@@ -48,6 +48,7 @@ impl Runtime {
 
     /// Executes a single instant to completion. Indicates if more work remains to be done.
     pub fn instant(&mut self) -> bool {
+        println!("instant");
         while let Some(cont) = self.currentInstant.pop() {
             cont.call_box(self, ());
         }
@@ -79,6 +80,14 @@ impl Runtime {
     }
 }
 
+fn question2() {
+    let mut runtime = Runtime::new();
+    let contPrint = Box::new(|run :&mut Runtime, ()| print!("42"));
+    let contWait = Box::new(|run :&mut Runtime, ()| run.on_next_instant(contPrint));
+    runtime.on_current_instant(contWait);
+    runtime.execute();
+}
+
 fn main() {
-    println!("Hello, world!");
+
 }
