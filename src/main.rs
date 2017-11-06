@@ -54,7 +54,7 @@ pub struct Pause<C> { continuation: C }
 
 impl<C> Continuation<()> for Pause<C>
     where C: Continuation<()> + 'static {
-    fn call(self, runtime: &mut Runtime, value: ()) {
+    fn call(self, runtime: &mut Runtime, _value: ()) {
         runtime.on_next_instant(Box::new(self.continuation));
     }
 
@@ -65,20 +65,20 @@ impl<C> Continuation<()> for Pause<C>
 
 /// Runtime for executing reactive continuations.
 pub struct Runtime {
-    currentInstant : Vec<Box<Continuation<()>>>,
-    endInstant : Vec<Box<Continuation<()>>>,
-    nextCurrentInstant : Vec<Box<Continuation<()>>>,
-    nextEndInstant : Vec<Box<Continuation<()>>>,
+    current_instant: Vec<Box<Continuation<()>>>,
+    end_instant: Vec<Box<Continuation<()>>>,
+    next_current_instant: Vec<Box<Continuation<()>>>,
+    next_end_instant: Vec<Box<Continuation<()>>>,
 }
 
 impl Runtime {
     /// Creates a new `Runtime`.
     pub fn new() -> Self {
         Runtime {
-            currentInstant : Vec::new(),
-            endInstant : Vec::new(),
-            nextCurrentInstant : Vec::new(),
-            nextEndInstant : Vec::new(),
+            current_instant: Vec::new(),
+            end_instant: Vec::new(),
+            next_current_instant: Vec::new(),
+            next_end_instant: Vec::new(),
         }
     }
 
@@ -89,34 +89,34 @@ impl Runtime {
 
     /// Executes a single instant to completion. Indicates if more work remains to be done.
     pub fn instant(&mut self) -> bool {
-        while let Some(cont) = self.currentInstant.pop() {
+        while let Some(cont) = self.current_instant.pop() {
             cont.call_box(self, ());
         }
-        std::mem::swap(&mut self.currentInstant, &mut self.nextCurrentInstant);
-        std::mem::swap(&mut self.endInstant, &mut self.nextEndInstant);
-        while let Some(cont) = self.nextEndInstant.pop() {
+        std::mem::swap(&mut self.current_instant, &mut self.next_current_instant);
+        std::mem::swap(&mut self.end_instant, &mut self.next_end_instant);
+        while let Some(cont) = self.next_end_instant.pop() {
             cont.call_box(self, ());
         }
 
-        (!self.currentInstant.is_empty())
-     || (!self.endInstant.is_empty())
-     || (!self.nextEndInstant.is_empty())
+        (!self.current_instant.is_empty())
+     || (!self.end_instant.is_empty())
+     || (!self.next_end_instant.is_empty())
     }
 
     /// Registers a continuation to execute on the current instant.
     fn on_current_instant(&mut self, c: Box<Continuation<()>>) {
-        self.currentInstant.push(c);
+        self.current_instant.push(c);
     }
 
     /// Registers a continuation to execute at the next instant.
     fn on_next_instant(&mut self, c: Box<Continuation<()>>) {
-        self.nextCurrentInstant.push(c);
+        self.next_current_instant.push(c);
     }
 
     /// Registers a continuation to execute at the end of the instant. Runtime calls for `c`
     /// behave as if they where executed during the next instant.
     fn on_end_of_instant(&mut self, c: Box<Continuation<()>>) {
-        self.endInstant.push(c);
+        self.end_instant.push(c);
     }
 }
 
@@ -125,9 +125,24 @@ fn question2() {
     let n = Rc::new(RefCell::new(0));
     let nn = n.clone();
     let mut runtime = Runtime::new();
-    let contPrint = Box::new(move |run :&mut Runtime, ()| *nn.borrow_mut() = 42);
-    let contWait = Box::new(|run :&mut Runtime, ()| run.on_next_instant(contPrint));
-    runtime.on_current_instant(contWait);
+    let cont_print = Box::new(move |_run :&mut Runtime, ()| *nn.borrow_mut() = 42);
+    let cont_wait = Box::new(|run :&mut Runtime, ()| run.on_next_instant(cont_print));
+    runtime.on_current_instant(cont_wait);
+    assert_eq!(*n.borrow(), 0);
+    assert!(runtime.instant());
+    assert_eq!(*n.borrow(), 0);
+    assert!(!runtime.instant());
+    assert_eq!(*n.borrow(), 42);
+}
+
+#[test]
+fn question5() {
+    let n = Rc::new(RefCell::new(0));
+    let nn = n.clone();
+    let mut runtime = Runtime::new();
+    let cont_print = Box::new(move |_run :&mut Runtime, ()| *nn.borrow_mut() = 42);
+    let cont_wait = Box::new(cont_print.pause());
+    runtime.on_current_instant(cont_wait);
     assert_eq!(*n.borrow(), 0);
     assert!(runtime.instant());
     assert_eq!(*n.borrow(), 0);
