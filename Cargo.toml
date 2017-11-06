@@ -1,7 +1,7 @@
 [package]
-name = "td3"
+name = "reactive_rs"
 version = "0.1.0"
-authors = ["Marc <vengeurk@gmailc.om>"]
+authors = ["Marc <vengeurk@gmail.com>"]
 
 [dependencies]
 bytes = "0.4.5"
