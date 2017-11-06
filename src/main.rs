@@ -89,7 +89,6 @@ impl Runtime {
 
     /// Executes a single instant to completion. Indicates if more work remains to be done.
     pub fn instant(&mut self) -> bool {
-        println!("instant");
         while let Some(cont) = self.currentInstant.pop() {
             cont.call_box(self, ());
         }
