@@ -24,37 +24,58 @@ impl<V, F> Continuation<V> for F where F: FnOnce(&mut Runtime, V) + 'static {
 
 /// Runtime for executing reactive continuations.
 pub struct Runtime {
-    // TODO
+    currentInstant : Vec<Box<Continuation<()>>>,
+    endInstant : Vec<Box<Continuation<()>>>,
+    nextCurrentInstant : Vec<Box<Continuation<()>>>,
+    nextEndInstant : Vec<Box<Continuation<()>>>,
 }
 
 impl Runtime {
     /// Creates a new `Runtime`.
-    pub fn new() -> Self { unimplemented!() } // TODO
+    pub fn new() -> Self {
+        Runtime {
+            currentInstant : Vec::new(),
+            endInstant : Vec::new(),
+            nextCurrentInstant : Vec::new(),
+            nextEndInstant : Vec::new(),
+        }
+    }
 
     /// Executes instants until all work is completed.
     pub fn execute(&mut self) {
-        unimplemented!() // TODO
+        while self.instant() {}
     }
 
     /// Executes a single instant to completion. Indicates if more work remains to be done.
     pub fn instant(&mut self) -> bool {
-        unimplemented!() // TODO
+        while let Some(cont) = self.currentInstant.pop() {
+            cont.call_box(self, ());
+        }
+        std::mem::swap(&mut self.currentInstant, &mut self.nextCurrentInstant);
+        std::mem::swap(&mut self.endInstant, &mut self.nextEndInstant);
+        while let Some(cont) = self.nextEndInstant.pop() {
+            cont.call_box(self, ());
+        }
+
+        (!self.currentInstant.is_empty())
+     || (!self.endInstant.is_empty())
+     || (!self.nextEndInstant.is_empty())
     }
 
     /// Registers a continuation to execute on the current instant.
     fn on_current_instant(&mut self, c: Box<Continuation<()>>) {
-        unimplemented!() // TODO
+        self.currentInstant.push(c);
     }
 
     /// Registers a continuation to execute at the next instant.
     fn on_next_instant(&mut self, c: Box<Continuation<()>>) {
-        unimplemented!() // TODO
+        self.nextCurrentInstant.push(c);
     }
 
     /// Registers a continuation to execute at the end of the instant. Runtime calls for `c`
     /// behave as if they where executed during the next instant.
     fn on_end_of_instant(&mut self, c: Box<Continuation<()>>) {
-        unimplemented!() // TODO
+        self.endInstant.push(c);
     }
 }
 
