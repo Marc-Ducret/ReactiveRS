@@ -1,3 +1,6 @@
+use std::rc::Rc;
+use std::cell::RefCell;
+
 /// A reactive continuation awaiting a value of type `V`. For the sake of simplicity,
 /// continuation must be valid on the static lifetime.
 pub trait Continuation<V>: 'static {
@@ -118,14 +121,20 @@ impl Runtime {
     }
 }
 
+#[test]
 fn question2() {
+    let n = Rc::new(RefCell::new(0));
+    let nn = n.clone();
     let mut runtime = Runtime::new();
-    let contPrint = Box::new(|run :&mut Runtime, ()| print!("42"));
+    let contPrint = Box::new(move |run :&mut Runtime, ()| *nn.borrow_mut() = 42);
     let contWait = Box::new(|run :&mut Runtime, ()| run.on_next_instant(contPrint));
     runtime.on_current_instant(contWait);
-    runtime.execute();
+    assert_eq!(*n.borrow(), 0);
+    assert!(runtime.instant());
+    assert_eq!(*n.borrow(), 0);
+    assert!(!runtime.instant());
+    assert_eq!(*n.borrow(), 42);
 }
 
 fn main() {
-
 }
