@@ -16,6 +16,10 @@ pub trait Continuation<V>: 'static {
     fn map<F, V2>(self, map: F) -> Map<Self, F> where Self: Sized, F: FnOnce(V2) -> V + 'static {
         Map { continuation: self, map }
     }
+
+    fn pause(self) -> Pause<Self> where Self: Sized + 'static {
+        Pause { continuation: self }
+    }
 }
 
 impl<V, F> Continuation<V> for F where F: FnOnce(&mut Runtime, V) + 'static {
@@ -39,6 +43,19 @@ impl<C, F, V1, V2> Continuation<V1> for Map<C, F>
     }
 
     fn call_box(self: Box<Self>, runtime: &mut Runtime, value: V1) {
+        (*self).call(runtime, value);
+    }
+}
+
+pub struct Pause<C> { continuation: C }
+
+impl<C> Continuation<()> for Pause<C>
+    where C: Continuation<()> + 'static {
+    fn call(self, runtime: &mut Runtime, value: ()) {
+        runtime.on_next_instant(Box::new(self.continuation));
+    }
+
+    fn call_box(self: Box<Self>, runtime: &mut Runtime, value: ()) {
         (*self).call(runtime, value);
     }
 }
