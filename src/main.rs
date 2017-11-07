@@ -88,7 +88,14 @@ pub trait Process: 'static {
     /// Executes the reactive process in the runtime, calls `next` with the resulting value.
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value>;
 
-    // TODO: add combinators
+    fn map<F, V2>(self, map: F) -> Map<Self, F> where Self: Sized, F: FnOnce(V2) -> Self::Value + 'static {
+        Map { continuation: self, map }
+    }
+
+    fn pause(self) -> Pause<Self> where Self: Sized + 'static {
+        Pause { continuation: self }
+    }
+
     fn flatten(self) -> Flatten<Self> where Self: Sized, Self::Value: Process {
         Flatten { process: self }
     }
@@ -122,6 +129,27 @@ impl<P> Process for Flatten<P>
         self.process.call(runtime, |runtime: &mut Runtime, p: P::Value| p.call(runtime, next));
     }
 }
+
+impl<F, V2, P> Process for Map<P, F>
+    where P : Process, F: FnOnce(P::Value) -> V2 + 'static
+{
+    type Value = V2;
+    fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
+        //self.continuation is a process
+        let f = self.map;
+        (self.continuation).call(runtime, move |runtime : &mut Runtime, x| (next.call(runtime, f(x))))
+    }
+}
+
+impl<P> Process for Pause<P> where P : Process {
+    type Value = P::Value;
+    fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
+        //self.continuation is a process
+        let process = self.continuation;
+        runtime.on_next_instant(Box::new(|run: &mut Runtime, x| process.call(run, next)))
+    }
+}
+
 
 //  ____              _   _
 // |  _ \ _   _ _ __ | |_(_)_ __ ___   ___
