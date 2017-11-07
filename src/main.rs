@@ -88,7 +88,7 @@ pub trait Process: 'static {
     /// Executes the reactive process in the runtime, calls `next` with the resulting value.
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value>;
 
-    fn map<F, V2>(self, map: F) -> Map<Self, F> where Self: Sized, F: FnOnce(V2) -> Self::Value + 'static {
+    fn map<F, V>(self, map: F) -> Map<Self, F> where Self: Sized, F: FnOnce(Self::Value) -> V + 'static {
         Map { continuation: self, map }
     }
 
@@ -136,10 +136,10 @@ impl<P> Process for Flatten<P>
     }
 }
 
-impl<F, V2, P> Process for Map<P, F>
-    where P : Process, F: FnOnce(P::Value) -> V2 + 'static
+impl<F, V, P> Process for Map<P, F>
+    where P : Process, F: FnOnce(P::Value) -> V + 'static
 {
-    type Value = V2;
+    type Value = V;
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
         //self.continuation is a process
         let f = self.map;
