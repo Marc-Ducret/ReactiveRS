@@ -89,6 +89,9 @@ pub trait Process: 'static {
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value>;
 
     // TODO: add combinators
+    fn flatten(self) -> Flatten<Self> where Self: Sized, Self::Value: Process {
+        Flatten { process: self }
+    }
 }
 
 pub struct Value<T> {
@@ -102,6 +105,23 @@ impl<T : 'static> Process for Value<T> {
     }
 }
 
+pub fn value<T>(val: T) -> Value<T> {
+    Value {val}
+}
+
+pub struct Flatten<P> {
+    process : P
+}
+
+impl<P> Process for Flatten<P>
+    where P : Process + 'static, P::Value : Process {
+
+    type Value = <P::Value as Process>::Value;
+
+    fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
+        self.process.call(runtime, |runtime: &mut Runtime, p: P::Value| p.call(runtime, next));
+    }
+}
 
 //  ____              _   _
 // |  _ \ _   _ _ __ | |_(_)_ __ ___   ___
@@ -202,6 +222,18 @@ fn question5() {
     assert!(runtime.instant());
     assert_eq!(*n.borrow(), 0);
     assert!(!runtime.instant());
+    assert_eq!(*n.borrow(), 42);
+}
+
+#[test]
+fn test_process1() {
+    let n = Rc::new(RefCell::new(0));
+    let nn = n.clone();
+    let mut runtime = Runtime::new();
+    let p = value(value(42));
+
+    assert_eq!(*n.borrow(), 0);
+    p.flatten().call(&mut runtime, move |_: &mut Runtime, val| *nn.borrow_mut() = val);
     assert_eq!(*n.borrow(), 42);
 }
 
