@@ -101,6 +101,12 @@ pub trait Process: 'static {
     }
 }
 
+pub fn execute_process<P>(p: P) where P: Process {
+    let mut runtime = Runtime::new();
+    runtime.on_current_instant(Box::new(|run: &mut Runtime, _| p.call(run, |_: &mut Runtime, _| ())));
+    runtime.execute();
+}
+
 pub struct Value<T> {
     val : T
 }
