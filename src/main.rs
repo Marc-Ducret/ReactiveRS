@@ -72,6 +72,29 @@ pub struct Runtime {
     next_end_instant: Vec<Box<Continuation<()>>>,
 }
 
+/// A reactive process.
+pub trait Process: 'static {
+    /// The value created by the process.
+    type Value;
+
+    /// Executes the reactive process in the runtime, calls `next` with the resulting value.
+    fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value>;
+
+    // TODO: add combinators
+}
+
+pub struct Value<T> {
+    val : T
+}
+
+impl<T : 'static> Process for Value<T> {
+    type Value = T;
+    fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
+        next.call(runtime, self.val)
+    }
+}
+
+
 impl Runtime {
     /// Creates a new `Runtime`.
     pub fn new() -> Self {
