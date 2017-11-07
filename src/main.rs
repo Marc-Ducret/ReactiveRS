@@ -52,13 +52,14 @@ impl<C, F, V1, V2> Continuation<V1> for Map<C, F>
 
 pub struct Pause<C> { continuation: C }
 
-impl<C> Continuation<()> for Pause<C>
-    where C: Continuation<()> + 'static {
-    fn call(self, runtime: &mut Runtime, _value: ()) {
-        runtime.on_next_instant(Box::new(self.continuation));
+impl<C, V> Continuation<V> for Pause<C>
+    where C: Continuation<V> + 'static, V: 'static {
+    fn call(self, runtime: &mut Runtime, value: V) {
+        let c = self.continuation;
+        runtime.on_next_instant(Box::new(|run: &mut Runtime, _| c.call(run, value)));
     }
 
-    fn call_box(self: Box<Self>, runtime: &mut Runtime, value: ()) {
+    fn call_box(self: Box<Self>, runtime: &mut Runtime, value: V) {
         (*self).call(runtime, value);
     }
 }
