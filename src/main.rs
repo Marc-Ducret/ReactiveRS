@@ -112,10 +112,10 @@ pub fn execute_process<P>(p: P) where P: Process {
 }
 
 pub struct Value<T> {
-    val : T
+    val: T
 }
 
-impl<T : 'static> Process for Value<T> {
+impl<T: 'static> Process for Value<T> {
     type Value = T;
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
         next.call(runtime, self.val)
@@ -127,11 +127,11 @@ pub fn value<T>(val: T) -> Value<T> {
 }
 
 pub struct Flatten<P> {
-    process : P
+    process: P
 }
 
 impl<P> Process for Flatten<P>
-    where P : Process + 'static, P::Value : Process {
+    where P: Process + 'static, P::Value: Process {
 
     type Value = <P::Value as Process>::Value;
 
@@ -141,17 +141,17 @@ impl<P> Process for Flatten<P>
 }
 
 impl<F, V2, P> Process for Map<P, F>
-    where P : Process, F: FnOnce(P::Value) -> V2 + 'static
+    where P: Process, F: FnOnce(P::Value) -> V2 + 'static
 {
     type Value = V2;
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
         //self.continuation is a process
         let f = self.map;
-        (self.continuation).call(runtime, move |runtime : &mut Runtime, x| (next.call(runtime, f(x))))
+        (self.continuation).call(runtime, move |runtime: &mut Runtime, x| (next.call(runtime, f(x))))
     }
 }
 
-impl<P> Process for Pause<P> where P : Process {
+impl<P> Process for Pause<P> where P: Process {
     type Value = P::Value;
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
         //self.continuation is a process
