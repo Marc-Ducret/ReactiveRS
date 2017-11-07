@@ -88,7 +88,7 @@ pub trait Process: 'static {
     /// Executes the reactive process in the runtime, calls `next` with the resulting value.
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value>;
 
-    fn map<F, V>(self, map: F) -> Map<Self, F> where Self: Sized, F: FnOnce(Self::Value) -> V + 'static {
+    fn map<F, V2>(self, map: F) -> Map<Self, F> where Self: Sized, F: FnOnce(Self::Value) -> V2 + 'static {
         Map { continuation: self, map }
     }
 
@@ -136,10 +136,10 @@ impl<P> Process for Flatten<P>
     }
 }
 
-impl<F, V, P> Process for Map<P, F>
-    where P : Process, F: FnOnce(P::Value) -> V + 'static
+impl<F, V2, P> Process for Map<P, F>
+    where P : Process, F: FnOnce(P::Value) -> V2 + 'static
 {
-    type Value = V;
+    type Value = V2;
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
         //self.continuation is a process
         let f = self.map;
@@ -152,7 +152,7 @@ impl<P> Process for Pause<P> where P : Process {
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
         //self.continuation is a process
         let process = self.continuation;
-        runtime.on_next_instant(Box::new(|run: &mut Runtime, x| process.call(run, next)))
+        runtime.on_next_instant(Box::new(|run: &mut Runtime, _| process.call(run, next)))
     }
 }
 
@@ -260,7 +260,7 @@ fn question5() {
 }
 
 #[test]
-fn test_process1() {
+fn test_flatten() {
     let n = Rc::new(RefCell::new(0));
     let nn = n.clone();
     let mut runtime = Runtime::new();
@@ -270,6 +270,20 @@ fn test_process1() {
     p.flatten().call(&mut runtime, move |_: &mut Runtime, val| *nn.borrow_mut() = val);
     assert_eq!(*n.borrow(), 42);
 }
+
+#[test]
+fn test_pause_process() {
+    let n = Rc::new(RefCell::new(0));
+    let nn = n.clone();
+    let p = value(42).pause().map(move |val| {
+        *nn.borrow_mut() = val;
+    });
+
+    assert_eq!(*n.borrow(), 0);
+    execute_process(p);
+    assert_eq!(*n.borrow(), 42);
+}
+
 
 fn main() {
 }
