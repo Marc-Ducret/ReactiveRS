@@ -1,6 +1,14 @@
 use std::rc::Rc;
 use std::cell::RefCell;
 
+
+//   ____            _   _                   _   _
+//  / ___|___  _ __ | |_(_)_ __  _   _  __ _| |_(_) ___  _ __
+// | |   / _ \| '_ \| __| | '_ \| | | |/ _` | __| |/ _ \| '_ \
+// | |__| (_) | | | | |_| | | | | |_| | (_| | |_| | (_) | | | |
+//  \____\___/|_| |_|\__|_|_| |_|\__,_|\__,_|\__|_|\___/|_| |_|
+
+
 /// A reactive continuation awaiting a value of type `V`. For the sake of simplicity,
 /// continuation must be valid on the static lifetime.
 pub trait Continuation<V>: 'static {
@@ -64,13 +72,13 @@ impl<C, V> Continuation<V> for Pause<C>
     }
 }
 
-/// Runtime for executing reactive continuations.
-pub struct Runtime {
-    current_instant: Vec<Box<Continuation<()>>>,
-    end_instant: Vec<Box<Continuation<()>>>,
-    next_current_instant: Vec<Box<Continuation<()>>>,
-    next_end_instant: Vec<Box<Continuation<()>>>,
-}
+
+//  ____
+// |  _ \ _ __ ___   ___ ___  ___ ___
+// | |_) | '__/ _ \ / __/ _ \/ __/ __|
+// |  __/| | | (_) | (_|  __/\__ \__ \
+// |_|   |_|  \___/ \___\___||___/___/
+
 
 /// A reactive process.
 pub trait Process: 'static {
@@ -94,6 +102,21 @@ impl<T : 'static> Process for Value<T> {
     }
 }
 
+
+//  ____              _   _
+// |  _ \ _   _ _ __ | |_(_)_ __ ___   ___
+// | |_) | | | | '_ \| __| | '_ ` _ \ / _ \
+// |  _ <| |_| | | | | |_| | | | | | |  __/
+// |_| \_\\__,_|_| |_|\__|_|_| |_| |_|\___|
+
+
+/// Runtime for executing reactive continuations.
+pub struct Runtime {
+    current_instant: Vec<Box<Continuation<()>>>,
+    end_instant: Vec<Box<Continuation<()>>>,
+    next_current_instant: Vec<Box<Continuation<()>>>,
+    next_end_instant: Vec<Box<Continuation<()>>>,
+}
 
 impl Runtime {
     /// Creates a new `Runtime`.
@@ -143,6 +166,14 @@ impl Runtime {
         self.end_instant.push(c);
     }
 }
+
+
+//  _____         _
+// |_   _|__  ___| |_ ___
+//   | |/ _ \/ __| __/ __|
+//   | |  __/\__ \ |_\__ \
+//   |_|\___||___/\__|___/
+
 
 #[test]
 fn question2() {
