@@ -99,6 +99,10 @@ pub trait Process: 'static {
     fn flatten(self) -> Flatten<Self> where Self: Sized, Self::Value: Process {
         Flatten { process: self }
     }
+
+    fn and_then<F, P>(self, then: F) -> Flatten<Map<Self, F>> where Self: Sized, F: FnOnce(Self::Value) -> P + 'static, P: Process {
+        self.map(then).flatten()
+    }
 }
 
 pub fn execute_process<P>(p: P) where P: Process {
