@@ -296,6 +296,10 @@ fn test_pause_process() {
     assert_eq!(*n.borrow(), 42);
 }
 
+#[test]
+fn test_process_return() {
+    assert_eq!(execute_process(value(42)), 42);
+}
 
 fn main() {
 }
