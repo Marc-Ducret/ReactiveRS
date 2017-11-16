@@ -105,6 +105,21 @@ pub trait Process: 'static {
     }
 }
 
+/// A process that can be executed multiple times, modifying its environment each time.
+pub trait ProcessMut: Process {
+    /// Executes the mutable process in the runtime, then calls `next` with the process and the
+    /// process's return value.
+    fn call_mut<C>(self, runtime: &mut Runtime, next: C) where
+        Self: Sized, C: Continuation<(Self, Self::Value)>;
+
+    fn while_loop<V>(self) -> While<Self> where Self: ProcessMut<Value = LoopStatus<V>>, Self: Sized {
+        While {process: self}
+    }
+}
+
+/// Indicates if a loop is finished.
+pub enum LoopStatus<V> { Continue, Exit(V) }
+
 pub fn execute_process<P>(p: P) -> P::Value where P: Process {
     let mut runtime = Runtime::new();
     let result = Rc::new(Cell::new(None));
@@ -130,6 +145,13 @@ impl<T: 'static> Process for Value<T> {
     }
 }
 
+impl<T: 'static> ProcessMut for Value<T> where T: Copy {
+    fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
+        let v = self.val.clone();
+        next.call(runtime, (self, v))
+    }
+}
+
 pub fn value<T>(val: T) -> Value<T> {
     Value {val}
 }
@@ -148,14 +170,35 @@ impl<P> Process for Flatten<P>
     }
 }
 
-impl<F, V2, P> Process for Map<P, F>
-    where P: Process, F: FnOnce(P::Value) -> V2 + 'static
-{
-    type Value = V2;
+impl<P> ProcessMut for Flatten<P>
+    where P: ProcessMut + 'static, P::Value: ProcessMut {
+
+    fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
+        self.process.call_mut(runtime, |runtime: &mut Runtime, (process, p): (P, P::Value)|
+            p.call_mut(runtime, next.map(|(p, v)| (process.flatten(), v)))
+        );
+    }
+}
+
+impl<F, V, P> Process for Map<P, F>
+    where P: Process, F: FnOnce(P::Value) -> V + 'static  {
+    type Value = V;
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
         //self.continuation is a process
         let f = self.map;
         (self.continuation).call(runtime, move |runtime: &mut Runtime, x| (next.call(runtime, f(x))))
+    }
+}
+
+impl<F, V, P> ProcessMut for Map<P, F>
+    where P: ProcessMut, F: FnMut(P::Value) -> V + 'static  {
+    fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
+        //self.continuation is a process
+        let mut f: F = self.map;
+        self.continuation.call_mut(runtime, move |runtime: &mut Runtime, (p, x): (P, P::Value)| {
+            let y = f(x);
+            next.call(runtime, (p.map(f), y))
+        })
     }
 }
 
@@ -168,6 +211,34 @@ impl<P> Process for Pause<P> where P: Process {
     }
 }
 
+impl<P> ProcessMut for Pause<P> where P: ProcessMut {
+    fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
+        //self.continuation is a process
+        let process = self.continuation;
+        runtime.on_next_instant(Box::new(|run: &mut Runtime, _|
+            process.call_mut(run, next.map(
+            |(p, x): (P, P::Value)| (p.pause(), x)
+            ))
+        ))
+    }
+}
+
+pub struct While<P> {
+    process: P
+}
+
+impl<P, V> Process for While<P> where P: ProcessMut<Value = LoopStatus<V>>, V: 'static {
+    type Value = V;
+
+    fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
+        self.process.call_mut(runtime, |runtime: &mut Runtime, (p, loop_status): (P, LoopStatus<V>)|
+            match loop_status {
+                LoopStatus::Continue => p.while_loop().call(runtime, next), //TODO better solution than calling while_loop
+                LoopStatus::Exit(value) => return next.call(runtime, value)
+            }
+        );
+    }
+}
 
 //  ____              _   _
 // |  _ \ _   _ _ __ | |_(_)_ __ ___   ___
@@ -299,6 +370,30 @@ fn test_pause_process() {
 #[test]
 fn test_process_return() {
     assert_eq!(execute_process(value(42)), 42);
+}
+
+#[test]
+fn test_process_while() {
+    let n = Rc::new(RefCell::new(0));
+    let nn = n.clone();
+
+    let iter = move |_| {
+        let mut x = nn.borrow_mut();
+        *x = *x + 1;
+        if *x == 42 {
+            return LoopStatus::Exit(());
+        } else {
+            return LoopStatus::Continue;
+        }
+    };
+
+    let p = value(()).map(
+        iter
+    ).while_loop();
+
+    assert_eq!(*n.borrow(), 0);
+    execute_process(p);
+    assert_eq!(*n.borrow(), 42);
 }
 
 fn main() {
