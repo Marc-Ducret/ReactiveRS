@@ -1,6 +1,6 @@
 use std::rc::Rc;
 use std::cell::RefCell;
-
+use std::cell::Cell;
 
 //   ____            _   _                   _   _
 //  / ___|___  _ __ | |_(_)_ __  _   _  __ _| |_(_) ___  _ __
@@ -17,8 +17,8 @@ pub trait Continuation<V>: 'static {
 
     /// Calls the continuation. Works even if the continuation is boxed.
     ///
-    /// This is necessary because the size of a value must be known to unbox it. It is
-    /// thus impossible to take the ownership of a `Box<Continuation>` whitout knowing the
+    /// This is necessary because the size of a value must be known to un-box it. It is
+    /// thus impossible to take the ownership of a `Box<Continuation>` without knowing the
     /// underlying type of the `Continuation`.
     fn call_box(self: Box<Self>, runtime: &mut Runtime, value: V);
 
@@ -107,21 +107,16 @@ pub trait Process: 'static {
 
 pub fn execute_process<P>(p: P) -> P::Value where P: Process {
     let mut runtime = Runtime::new();
-    let result = Rc::new(RefCell::new(None));
+    let result = Rc::new(Cell::new(None));
     let result_ref = result.clone();
     runtime.on_current_instant(Box::new(|run: &mut Runtime, _|
-        p.call(run, move |_: &mut Runtime, val| *result_ref.borrow_mut() = Some(val))));
+    p.call(run, move |_: &mut Runtime, val| result_ref.set(Some(val)))));
     runtime.execute();
-    let test = *result.borrow();
-    if let Some(res) = test {
+    if let Some(res) = result.replace(None) {
         return res;
     } else {
         panic!("No result from execute?!");
     }
-//    match *result.borrow() {
-//        None => panic!("No result from execute?!"),
-//        Some(res) => res
-//    }
 }
 
 pub struct Value<T> {
