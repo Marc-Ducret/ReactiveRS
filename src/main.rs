@@ -240,6 +240,72 @@ impl<P, V> Process for While<P> where P: ProcessMut<Value = LoopStatus<V>>, V: '
     }
 }
 
+// ____                 ____  _                   _
+//|  _ \ _   _ _ __ ___/ ___|(_) __ _ _ __   __ _| |
+//| |_) | | | | '__/ _ \___ \| |/ _` | '_ \ / _` | |
+//|  __/| |_| | | |  __/___) | | (_| | | | | (_| | |
+//|_|    \__,_|_|  \___|____/|_|\__, |_| |_|\__,_|_|
+//                              |___/
+
+/// A shared pointer to a signal runtime.
+#[derive(Clone)]
+pub struct SignalRuntimeRef {
+    runtime: Rc<SignalRuntime>,
+}
+
+/// Runtime for pure signals.
+struct SignalRuntime {
+    callbacks: Vec<Box<Continuation<()>>>,
+}
+
+impl SignalRuntime {
+    fn add_callback<C>(&mut self, c: C) where C: Continuation<()> {
+        self.callbacks.push(Box::new(c));
+    }
+}
+
+impl SignalRuntimeRef {
+    /// Sets the signal as emitted for the current instant.
+    fn emit(self, runtime: &mut Runtime) {
+        //self.runtime.;
+    }
+
+    /// Calls `c` at the first cycle where the signal is present.
+    fn on_signal<C>(mut self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
+        if let Some(run) = Rc::get_mut(&mut self.runtime) {
+            run.add_callback(c);
+        }
+    }
+
+    // TODO: add other methods when needed.
+}
+
+/// A reactive signal.
+pub trait Signal {
+    /// Returns a reference to the signal's runtime.
+    fn runtime(self) -> SignalRuntimeRef;
+
+    /// Returns a process that waits for the next emission of the signal, current instant
+    /// included.
+    fn await_immediate(self) -> AwaitImmediate where Self: Sized {
+        unimplemented!() // TODO
+    }
+
+    // TODO: add other methods if needed.
+}
+
+pub struct AwaitImmediate {
+    // TODO
+}
+
+//impl Process for AwaitImmediate {
+//    // TODO
+//}
+//
+//impl ProcessMut for AwaitImmediate {
+//    // TODO
+//}
+
 //  ____              _   _
 // |  _ \ _   _ _ __ | |_(_)_ __ ___   ___
 // | |_) | | | | '_ \| __| | '_ ` _ \ / _ \
