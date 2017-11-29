@@ -250,12 +250,13 @@ impl<P, V> Process for While<P> where P: ProcessMut<Value = LoopStatus<V>>, V: '
 /// A shared pointer to a signal runtime.
 #[derive(Clone)]
 pub struct SignalRuntimeRef {
-    runtime: Rc<SignalRuntime>,
+    signal_runtime: Rc<SignalRuntime>,
 }
 
 /// Runtime for pure signals.
 struct SignalRuntime {
     callbacks: Vec<Box<Continuation<()>>>,
+    status: bool,
 }
 
 impl SignalRuntime {
@@ -266,14 +267,23 @@ impl SignalRuntime {
 
 impl SignalRuntimeRef {
     /// Sets the signal as emitted for the current instant.
-    fn emit(self, runtime: &mut Runtime) {
-        //self.runtime.;
+    fn emit(mut self, runtime: &mut Runtime) {
+        if let Some(sig_run) = Rc::get_mut(&mut self.signal_runtime) {
+            while let Some(c) = sig_run.callbacks.pop() {
+                c.call_box(runtime, ());
+            }
+            sig_run.status = true;
+        }
     }
 
     /// Calls `c` at the first cycle where the signal is present.
     fn on_signal<C>(mut self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
-        if let Some(run) = Rc::get_mut(&mut self.runtime) {
-            run.add_callback(c);
+        if let Some(sig_run) = Rc::get_mut(&mut self.signal_runtime) {
+            if sig_run.status {
+                c.call(runtime, ());
+            } else {
+                sig_run.add_callback(c);
+            }
         }
     }
 
@@ -281,27 +291,31 @@ impl SignalRuntimeRef {
 }
 
 /// A reactive signal.
-pub trait Signal {
+pub trait Signal: 'static {
     /// Returns a reference to the signal's runtime.
     fn runtime(self) -> SignalRuntimeRef;
 
     /// Returns a process that waits for the next emission of the signal, current instant
     /// included.
-    fn await_immediate(self) -> AwaitImmediate where Self: Sized {
-        unimplemented!() // TODO
+    fn await_immediate(self) -> AwaitImmediate<Self> where Self: Sized {
+        AwaitImmediate { signal: self }
     }
 
     // TODO: add other methods if needed.
 }
 
-pub struct AwaitImmediate {
-    // TODO
+pub struct AwaitImmediate<S> {
+    signal: S
 }
 
-//impl Process for AwaitImmediate {
-//    // TODO
-//}
-//
+impl<S> Process for AwaitImmediate<S> where S: Signal{
+    type Value = ();
+
+    fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
+        self.signal.runtime().on_signal(runtime, c);
+    }
+}
+
 //impl ProcessMut for AwaitImmediate {
 //    // TODO
 //}
