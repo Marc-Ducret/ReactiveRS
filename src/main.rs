@@ -1,6 +1,8 @@
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::cell::Cell;
+use std::option::Option;
+
 
 //   ____            _   _                   _   _
 //  / ___|___  _ __ | |_(_)_ __  _   _  __ _| |_(_) ___  _ __
@@ -102,6 +104,13 @@ pub trait Process: 'static {
 
     fn and_then<F, P>(self, then: F) -> Flatten<Map<Self, F>> where Self: Sized, F: FnOnce(Self::Value) -> P + 'static, P: Process {
         self.map(then).flatten()
+    }
+
+    fn join<P>(self, process: P) -> Join<Self, P> where Self: Sized, P: Process {
+        Join {
+            p1: self,
+            p2: process
+        }
     }
 }
 
@@ -209,6 +218,56 @@ impl<P> Process for Pause<P> where P: Process {
         let process = self.continuation;
         runtime.on_next_instant(Box::new(|run: &mut Runtime, _| process.call(run, next)))
     }
+}
+
+pub struct Join<P1, P2> { p1: P1, p2: P2 }
+
+impl<P1, P2> Process for Join<P1, P2> where P1: Process, P2: Process {
+    type Value = (P1::Value, P2::Value);
+    fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
+        struct JoinPoint<T1, T2, C> {
+            x1: Option<T1>,
+            x2: Option<T2>,
+            next: Option<C>
+        }
+
+        impl<T1, T2, C> JoinPoint<T1, T2, C> where C: Continuation<(T1, T2)> {
+            fn call_continuation(&mut self, run: &mut Runtime) {
+                if self.x1.is_some() {
+                    if self.x2.is_some() {
+                        let next = self.next.take();
+                        let x1 = self.x1.take();
+                        let x2 = self.x2.take();
+                        if let Some(y1) = x1 {
+                            if let Some(y2) = x2 {
+                                if let Some(cont) = next {
+                                    cont.call(run, (y1, y2));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        let jp = Rc::new(RefCell::new(JoinPoint{x1: None, x2: None, next: Some(next)}));
+
+        let jp1 = jp.clone();
+        self.p1.call(runtime, move |run: &mut Runtime, x1| {
+            jp1.borrow_mut().x1 = Some(x1);
+            jp1.borrow_mut().call_continuation(run)
+        });
+
+        let jp2 = jp.clone();
+        self.p2.call(runtime, move |run: &mut Runtime, x2| {
+            jp2.borrow_mut().x2 = Some(x2);
+            jp2.borrow_mut().call_continuation(run)
+        });
+    }
+}
+
+pub fn join<P1, P2>(p1: P1, p2: P2) -> Join<P1, P2> {
+    Join {p1, p2}
 }
 
 impl<P> ProcessMut for Pause<P> where P: ProcessMut {
@@ -366,6 +425,20 @@ fn test_pause_process() {
     execute_process(p);
     assert_eq!(*n.borrow(), 42);
 }
+
+#[test]
+fn test_join_process() {
+    let n = Rc::new(RefCell::new((0, 0)));
+    let nn = n.clone();
+    let p = join(value(42), value(1337)).map(move |val| {
+        *nn.borrow_mut() = val;
+    });
+
+    assert_eq!(*n.borrow(), (0, 0));
+    execute_process(p);
+    assert_eq!(*n.borrow(), (42, 1337));
+}
+
 
 #[test]
 fn test_process_return() {
