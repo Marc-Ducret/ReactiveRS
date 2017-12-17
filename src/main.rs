@@ -128,6 +128,7 @@ pub trait ProcessMut: Process {
 }
 
 /// Indicates if a loop is finished.
+#[derive(Copy, Clone)]
 pub enum LoopStatus<V> { Continue, Exit(V) }
 
 pub fn execute_process<P>(p: P) -> P::Value where P: Process {
@@ -142,7 +143,7 @@ pub fn execute_process<P>(p: P) -> P::Value where P: Process {
     if let Some(res) = result.replace(None) {
         return res;
     } else {
-        panic!("No result from execute?!");
+        panic!("No result from execute?! (result continuation was probably lost)");
     }
 }
 
@@ -187,7 +188,7 @@ impl<P> ProcessMut for Flatten<P>
 
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
         self.process.call_mut(runtime, |runtime: &mut Runtime, (process, p): (P, P::Value)|
-            p.call_mut(runtime, next.map(|(p, v)| (process.flatten(), v)))
+            p.call_mut(runtime, next.map(|(_, v)| (process.flatten(), v)))
         );
     }
 }
@@ -302,6 +303,49 @@ impl<P, V> Process for While<P> where P: ProcessMut<Value = LoopStatus<V>>, V: '
     }
 }
 
+pub fn if_else<P, Q, R>(r: R, p: P, q: Q) -> If<P, Q, R> {
+    If {process_if: p, process_else: q, process_cond: r}
+}
+
+pub struct If<P, Q, R> {
+    process_if: P,
+    process_else: Q,
+    process_cond: R,
+}
+
+impl<P, Q, R, V> Process for If<P, Q, R> where P: Process<Value = V>, Q: Process<Value = V>, R: Process<Value = bool> {
+    type Value = V;
+
+    fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<V> {
+        let p = self.process_if;
+        let q = self.process_else;
+        let r = self.process_cond;
+        r.call(runtime, move |runtime: &mut Runtime, cond: bool| {
+           if cond {
+               p.call(runtime, next);
+           } else {
+               q.call(runtime, next);
+           }
+        });
+    }
+}
+
+impl<P, Q, R, V> ProcessMut for If<P, Q, R> where P: ProcessMut<Value = V>, Q: ProcessMut<Value = V>, R: ProcessMut<Value = bool> {
+
+    fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, V)> {
+        let p = self.process_if;
+        let q = self.process_else;
+        let r = self.process_cond;
+        r.call_mut(runtime, move |runtime: &mut Runtime, (r, cond): (R, bool)| {
+            if cond {
+                p.call_mut(runtime, next.map(|(p, v): (P, V)| (if_else(r, p, q), v)));
+            } else {
+                q.call_mut(runtime, next.map(|(q, v): (Q, V)| (if_else(r, p, q), v)));
+            }
+        });
+    }
+}
+
 // ____                 ____  _                   _
 //|  _ \ _   _ _ __ ___/ ___|(_) __ _ _ __   __ _| |
 //| |_) | | | | '__/ _ \___ \| |/ _` | '_ \ / _` | |
@@ -318,6 +362,7 @@ pub struct SignalRuntimeRef {
 /// Runtime for pure signals.
 struct SignalRuntime {
     callbacks: Vec<Box<Continuation<()>>>,
+    waiting_present: Vec<Box<Continuation<bool>>>,
     status: bool,
 }
 
@@ -329,19 +374,22 @@ impl SignalRuntime {
 
 impl SignalRuntimeRef {
     /// Sets the signal as emitted for the current instant.
-    fn emit(mut self, runtime: &mut Runtime) {
+    fn emit(self, runtime: &mut Runtime) {
         {
             let sig_run = self.signal_runtime.clone();
             let mut sig = sig_run.lock().unwrap();
             while let Some(c) = sig.callbacks.pop() {
                 c.call_box(runtime, ());
             }
+            while let Some(c) = sig.waiting_present.pop() {
+                c.call_box(runtime, true);
+            }
             sig.status = true;
         }
 
         {
             let sig_run = self.signal_runtime.clone();
-            runtime.on_end_of_instant(Box::new(move |runtime: &mut Runtime, ()| {
+            runtime.on_end_of_instant(Box::new(move |_: &mut Runtime, ()| {
                 let mut sig = sig_run.lock().unwrap();
                 sig.status = false;
             }))
@@ -349,7 +397,7 @@ impl SignalRuntimeRef {
     }
 
     /// Calls `c` at the first cycle where the signal is present.
-    fn on_signal<C>(mut self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
+    fn on_signal<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
         let sig_run = self.signal_runtime.clone();
         let mut sig = sig_run.lock().unwrap();
         if sig.status {
@@ -359,28 +407,68 @@ impl SignalRuntimeRef {
         }
     }
 
-    // TODO: add other methods when needed.
+    fn test_present<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<bool> {
+        let sig_run = self.signal_runtime.clone();
+        let mut sig = sig_run.lock().unwrap();
+        if sig.status {
+            c.call(runtime, true);
+        } else {
+            if sig.waiting_present.is_empty() {
+                let sig_run = self.signal_runtime.clone();
+                runtime.on_end_of_instant(Box::new(move |runtime: &mut Runtime, ()| {
+                    let mut sig = sig_run.lock().unwrap();
+                    while let Some(c) = sig.waiting_present.pop() {
+                        c.call_box(runtime, false)
+                    }
+                }));
+            }
+            sig.waiting_present.push(Box::new(c));
+        }
+    }
 }
 
 /// A reactive signal.
 pub trait Signal: 'static {
     /// Returns a reference to the signal's runtime.
-    fn runtime(self) -> SignalRuntimeRef;
+    fn runtime(&self) -> SignalRuntimeRef;
 
     /// Returns a process that waits for the next emission of the signal, current instant
     /// included.
-    fn await_immediate(self) -> AwaitImmediate where Self: Sized {
+    fn await_immediate(&self) -> AwaitImmediate where Self: Sized {
         AwaitImmediate { signal: self.runtime() }
     }
 
-    fn emit(self) -> Emit where Self: Sized {
+    fn emit(&self) -> Emit where Self: Sized {
         Emit {signal: self.runtime()}
+    }
+
+    fn present(&self) -> Present where Self: Sized {
+        Present {signal: self.runtime()}
     }
 }
 
-impl Signal for SignalRuntime {
-    fn runtime(self) -> SignalRuntimeRef {
-        SignalRuntimeRef { signal_runtime: Arc::new(Mutex::new(self)) }
+pub struct PureSignal {
+    runtime: SignalRuntimeRef
+}
+
+impl PureSignal {
+    fn new() -> PureSignal {
+        let runtime = SignalRuntime {status: false, callbacks: vec!(), waiting_present: vec!()};
+        PureSignal {
+            runtime: SignalRuntimeRef {signal_runtime: Arc::new(Mutex::new(runtime))}
+        }
+    }
+}
+
+impl Clone for PureSignal {
+    fn clone(&self) -> Self {
+        PureSignal {runtime: self.runtime.clone()}
+    }
+}
+
+impl Signal for PureSignal {
+    fn runtime(&self) -> SignalRuntimeRef {
+        self.runtime.clone()
     }
 }
 
@@ -423,6 +511,28 @@ impl ProcessMut for Emit {
         let sig = self.signal.clone();
         self.signal.emit(runtime);
         next.call(runtime, (Emit {signal: sig}, ()))
+    }
+}
+
+pub struct Present {
+    signal: SignalRuntimeRef
+}
+
+impl Process for Present {
+    type Value = bool;
+
+    fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<bool> {
+        self.signal.test_present(runtime, next);
+    }
+}
+
+impl ProcessMut for Present {
+
+    fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, bool)> {
+        let sig = self.signal.clone();
+        self.signal.test_present(runtime, move |runtime: &mut Runtime, status: bool| {
+            next.call(runtime, (Present{signal: sig}, status))
+        });
     }
 }
 
@@ -597,23 +707,29 @@ fn test_process_while() {
 }
 
 #[test]
-fn test_signal() {
+fn test_process_if() {
+    let p = if_else(value(false),
+        if_else(value(true), value(1), value(2)),
+        if_else(value(true), value(3), value(4)));
+
+    assert_eq!(execute_process(p), 3);
+}
+
+#[test]
+fn test_signal_await() {
     let n = Rc::new(RefCell::new(0));
     let nn = n.clone();
     let nnn = n.clone();
     let nnnn = n.clone();
-    let s = SignalRuntime {status: false, callbacks: Vec::new()};
-
-    let sref = s.runtime();
-    let sreff = sref.clone();
+    let s =  PureSignal::new();
 
     let p = join(
-        AwaitImmediate{signal: sreff}.map(move |()| {
+        s.await_immediate().map(move |()| {
             *nnn.borrow_mut() = 1337;
         }),
         value(()).map(move |()| {
             *nn.borrow_mut() = 42;
-        }).and_then(|()| Emit{signal: sref}).pause().map(move |()| {
+        }).and_then(move |()| s.emit()).pause().map(move |()| {
             *nnnn.borrow_mut() += 1;
         })
     );
@@ -624,23 +740,22 @@ fn test_signal() {
 }
 
 #[test]
-fn test_signal_2() {
+fn test_signal_await_2() {
     let n = Rc::new(RefCell::new(0));
     let nn = n.clone();
     let nnn = n.clone();
     let nnnn = n.clone();
-    let s = SignalRuntime {status: true, callbacks: Vec::new()};
-
-    let sref = s.runtime();
-    let sreff = sref.clone();
+    let s = PureSignal::new();
+    let sig_ref = s.runtime().clone();
+    sig_ref.signal_runtime.lock().unwrap().status = true;
 
     let p = join(
-        AwaitImmediate{signal: sreff}.map(move |()| {
+        s.await_immediate().map(move |()| {
             *nnn.borrow_mut() = 1337;
         }),
         value(()).map(move |()| {
             *nn.borrow_mut() = 42;
-        }).and_then(|()| Emit{signal: sref}).pause().map(move |()| {
+        }).and_then(move |()| s.emit()).pause().map(move |()| {
             *nnnn.borrow_mut() += 1;
         })
     );
@@ -649,6 +764,42 @@ fn test_signal_2() {
     execute_process(p);
     assert_eq!(*n.borrow(), 43);
 }
+
+#[test]
+fn test_signal_present() {
+    let s = PureSignal::new();
+
+    let n = Rc::new(RefCell::new(0));
+    let m = Rc::new(RefCell::new(0));
+    let mm = m.clone();
+
+    let iter = move |_| {
+        let mut x = n.borrow_mut();
+        *x = *x + 1;
+        if *x == 42 {
+            return LoopStatus::Exit(());
+        } else {
+            return LoopStatus::Continue;
+        }
+    };
+
+    let iter2 = move |_| {
+        let mut x = mm.borrow_mut();
+        *x = *x + 2;
+        LoopStatus::Continue
+    };
+
+    let p = s.emit().map(
+        iter
+    ).pause().while_loop();
+
+    let q = if_else(s.present(), value(()).map(iter2), value(LoopStatus::Exit(()))).pause().while_loop();
+
+    assert_eq!(*m.borrow(), 0);
+    execute_process(join(p, q));
+    assert_eq!(*m.borrow(), 42 * 2);
+}
+
 
 fn main() {
 }
