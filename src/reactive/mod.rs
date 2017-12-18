@@ -8,6 +8,7 @@ use std;
 mod continuation;
 pub mod process;
 pub mod pure_signal;
+pub mod value_signal;
 mod tests;
 
 use self::continuation::*;
