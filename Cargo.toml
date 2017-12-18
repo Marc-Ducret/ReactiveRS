@@ -1,5 +1,5 @@
 [package]
-name = "reactive_rs"
+name = "ppr"
 version = "0.1.0"
 authors = ["Marc <vengeurk@gmail.com>"]
 
@@ -8,3 +8,7 @@ bytes = "0.4.5"
 tokio-core = "0.1.9"
 tokio-io = "0.1.3"
 futures = "0.1.16"
+
+[lib]
+name = "reactive_rs"
+path = "src/lib.rs"
