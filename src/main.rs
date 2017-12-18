@@ -1,6 +1,8 @@
 extern crate reactive_rs;
 
-use reactive_rs::reactive::*;
+use reactive_rs::reactive::process::*;
+use reactive_rs::reactive::pure_signal::*;
+
 use std::{thread, time};
 
 fn main() {
