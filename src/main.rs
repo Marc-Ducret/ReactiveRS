@@ -103,8 +103,12 @@ pub trait Process: 'static {
         Flatten { process: self }
     }
 
-    fn and_then<F, P>(self, then: F) -> Flatten<Map<Self, F>> where Self: Sized, F: FnOnce(Self::Value) -> P + 'static, P: Process {
+    fn and_then<F, P>(self, then: F) -> Flatten<Map<Self, F>> where Self: Sized, F: Fn(Self::Value) -> P + 'static, P: Process {
         self.map(then).flatten()
+    }
+
+    fn then<P>(self, process: P) -> Then<Self, P> where Self: Sized, P: Process {
+        Then {p: self, q: process}
     }
 
     fn join<P>(self, process: P) -> Join<Self, P> where Self: Sized, P: Process {
@@ -112,6 +116,33 @@ pub trait Process: 'static {
             p1: self,
             p2: process
         }
+    }
+}
+
+pub struct Then<P, Q> {
+    p: P,
+    q: Q,
+}
+
+impl<P, Q> Process for Then<P, Q> where P: Process, Q: Process {
+    type Value = Q::Value;
+
+    fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
+        let p = self.p;
+        let q = self.q;
+        p.call(runtime, move |runtime: &mut Runtime, _| q.call(runtime, next))
+    }
+}
+
+impl<P, Q> ProcessMut for Then<P, Q> where P: ProcessMut, Q: ProcessMut {
+    fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
+        let p = self.p;
+        let q = self.q;
+        p.call_mut(runtime, move |runtime: &mut Runtime, (p, _): (P, P::Value)|
+            q.call_mut(runtime, |runtime: &mut Runtime, (q, value): (Q, Q::Value)|
+                next.call(runtime, (p.then(q), value))
+            )
+        )
     }
 }
 
@@ -136,9 +167,10 @@ pub fn execute_process<P>(p: P) -> P::Value where P: Process {
     let result = Rc::new(Cell::new(None));
     let result_ref = result.clone();
     runtime.on_current_instant(Box::new(|run: &mut Runtime, _|
-    p.call(run, move |_: &mut Runtime, val| {
-        result_ref.set(Some(val))
-    })));
+        p.call(run, move |_: &mut Runtime, val| {
+            result_ref.set(Some(val))
+        })
+    ));
     runtime.execute();
     if let Some(res) = result.replace(None) {
         return res;
@@ -224,6 +256,18 @@ impl<P> Process for Pause<P> where P: Process {
     }
 }
 
+impl<P> ProcessMut for Pause<P> where P: ProcessMut {
+    fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
+        //self.continuation is a process
+        let process = self.continuation;
+        runtime.on_next_instant(Box::new(|run: &mut Runtime, _|
+            process.call_mut(run, next.map(
+                |(p, x): (P, P::Value)| (p.pause(), x)
+            ))
+        ))
+    }
+}
+
 pub struct Join<P1, P2> { p1: P1, p2: P2 }
 
 impl<P1, P2> Process for Join<P1, P2> where P1: Process, P2: Process {
@@ -272,18 +316,6 @@ impl<P1, P2> Process for Join<P1, P2> where P1: Process, P2: Process {
 
 pub fn join<P1, P2>(p1: P1, p2: P2) -> Join<P1, P2> {
     Join {p1, p2}
-}
-
-impl<P> ProcessMut for Pause<P> where P: ProcessMut {
-    fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
-        //self.continuation is a process
-        let process = self.continuation;
-        runtime.on_next_instant(Box::new(|run: &mut Runtime, _|
-            process.call_mut(run, next.map(
-            |(p, x): (P, P::Value)| (p.pause(), x)
-            ))
-        ))
-    }
 }
 
 pub struct While<P> {
@@ -379,10 +411,10 @@ impl SignalRuntimeRef {
             let sig_run = self.signal_runtime.clone();
             let mut sig = sig_run.lock().unwrap();
             while let Some(c) = sig.callbacks.pop() {
-                c.call_box(runtime, ());
+                runtime.on_current_instant(c);
             }
             while let Some(c) = sig.waiting_present.pop() {
-                c.call_box(runtime, true);
+                runtime.on_current_instant(Box::new(|runtime: &mut Runtime, ()| c.call_box(runtime, true)));
             }
             sig.status = true;
         }
@@ -401,7 +433,7 @@ impl SignalRuntimeRef {
         let sig_run = self.signal_runtime.clone();
         let mut sig = sig_run.lock().unwrap();
         if sig.status {
-            c.call(runtime, ());
+            runtime.on_current_instant(Box::new(c));
         } else {
             sig.add_callback(c);
         }
@@ -488,7 +520,7 @@ impl ProcessMut for AwaitImmediate {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, ())> {
         let sig = self.signal.clone();
         self.signal.on_signal(runtime, |runtime: &mut Runtime, ()| {
-            next.call(runtime, ( AwaitImmediate { signal: sig }, ()))
+            next.call(runtime, ( AwaitImmediate {signal: sig}, ()))
         });
     }
 }
@@ -729,7 +761,7 @@ fn test_signal_await() {
         }),
         value(()).map(move |()| {
             *nn.borrow_mut() = 42;
-        }).and_then(move |()| s.emit()).pause().map(move |()| {
+        }).then(s.emit()).pause().map(move |()| {
             *nnnn.borrow_mut() += 1;
         })
     );
@@ -755,7 +787,7 @@ fn test_signal_await_2() {
         }),
         value(()).map(move |()| {
             *nn.borrow_mut() = 42;
-        }).and_then(move |()| s.emit()).pause().map(move |()| {
+        }).then(s.emit()).pause().map(move |()| {
             *nnnn.borrow_mut() += 1;
         })
     );
@@ -800,6 +832,26 @@ fn test_signal_present() {
     assert_eq!(*m.borrow(), 42 * 2);
 }
 
+use std::{thread, time};
 
 fn main() {
+    let s = PureSignal::new();
+
+    let continu: LoopStatus<()> = LoopStatus::Continue;
+    let dt = time::Duration::from_millis(100);
+    let print_emit = move |_| {
+        println!("emit");
+        thread::sleep(dt);
+    };
+    let print_present = |_| println!("present");
+    let print_not_present = |_| println!("not present");
+    let print_received = |_| println!("received");
+    let p = s.emit().map(print_emit).then(value(continu).pause()).while_loop();
+    let q = if_else(s.present(),
+            value(()).map(print_present).then(value(()).pause()),
+            value(()).map(print_not_present)
+    ).then(value(continu)).while_loop();
+    let r = s.await_immediate().map(print_received).then(value(continu).pause()).while_loop();
+
+    execute_process(join(p, join(q, r)));
 }
