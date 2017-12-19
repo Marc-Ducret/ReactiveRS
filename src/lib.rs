@@ -1,5 +1,1 @@
-pub mod reactive;
-
-#[cfg(test)]
-mod tests {
-}
+#![allow(unused_imports)] pub mod reactive;

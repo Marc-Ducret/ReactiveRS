@@ -1,3 +1,8 @@
+extern crate timebomb;
+
+use std::thread;
+use self::timebomb::{timeout_ms};
+
 use super::*;
 
 //  _____         _
@@ -197,4 +202,22 @@ fn test_signal_present() {
     assert_eq!(*m.borrow(), 0);
     execute_process(join(p, q));
     assert_eq!(*m.borrow(), 42 * 2);
+}
+
+#[test]
+fn test_value_signal() {
+    timeout_ms(|| {
+        let s: ValueSignal<i32, i32> = ValueSignal::new(0, Box::new(|x, y| x + y));
+
+        assert_eq!(execute_process(join(s.emit(1).then(s.emit(5)), s.await())), ((), 6));
+        assert_eq!(execute_process(join(s.emit(1).then(s.emit(5).pause()), s.await())), ((), 1));
+        assert_eq!(execute_process(join(
+            s.emit(2).then(s.emit(5).pause()).then(s.emit(15).pause()).then(s.emit(15).pause()).then(s.emit(15).pause()).then(s.emit(15).pause()).then(s.emit(15).pause()).then(s.emit(15).pause()),
+            join(
+                s.await(),
+                s.await().then(s.await())
+            ).map(|(x, y)| x * y)
+        )),
+                   ((), 10));
+    }, 1000);
 }

@@ -4,6 +4,7 @@ use std::cell::Cell;
 use std::option::Option;
 use std::sync::{Arc, Mutex};
 use std;
+use std::{thread, time};
 
 mod continuation;
 pub mod process;
@@ -14,6 +15,7 @@ mod tests;
 use self::continuation::*;
 use self::process::*;
 use self::pure_signal::*;
+use self::value_signal::*;
 
 //  ____              _   _
 // |  _ \ _   _ _ __ | |_(_)_ __ ___   ___
@@ -43,7 +45,10 @@ impl Runtime {
 
     /// Executes instants until all work is completed.
     pub fn execute(&mut self) {
-        while self.instant() {}
+        while self.instant() {
+//            thread::sleep(time::Duration::from_millis(100));
+//            println!("%instant%")
+        }
     }
 
     /// Executes a single instant to completion. Indicates if more work remains to be done.
