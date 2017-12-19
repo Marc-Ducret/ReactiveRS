@@ -9,24 +9,24 @@ use super::*;
 
 /// A shared pointer to a signal runtime.
 #[derive(Clone)]
-pub struct SignalRuntimeRef {
-    pub signal_runtime: Arc<Mutex<SignalRuntime>>,
+pub struct PSignalRuntimeRef {
+    pub signal_runtime: Arc<Mutex<PSignalRuntime>>,
 }
 
 /// Runtime for pure signals.
-pub struct SignalRuntime {
+pub struct PSignalRuntime {
     callbacks: Vec<Box<Continuation<()>>>,
     waiting_present: Vec<Box<Continuation<bool>>>,
     pub status: bool,
 }
 
-impl SignalRuntime {
+impl PSignalRuntime {
     fn add_callback<C>(&mut self, c: C) where C: Continuation<()> {
         self.callbacks.push(Box::new(c));
     }
 }
 
-impl SignalRuntimeRef {
+impl PSignalRuntimeRef {
     /// Sets the signal as emitted for the current instant.
     fn emit(self, runtime: &mut Runtime) {
         {
@@ -82,34 +82,34 @@ impl SignalRuntimeRef {
 }
 
 /// A reactive signal.
-pub trait Signal: 'static {
+pub trait PSignal: 'static {
     /// Returns a reference to the signal's runtime.
-    fn runtime(&self) -> SignalRuntimeRef;
+    fn runtime(&self) -> PSignalRuntimeRef;
 
     /// Returns a process that waits for the next emission of the signal, current instant
     /// included.
-    fn await_immediate(&self) -> AwaitImmediate where Self: Sized {
-        AwaitImmediate { signal: self.runtime() }
+    fn await_immediate(&self) -> PAwaitImmediate where Self: Sized {
+        PAwaitImmediate { signal: self.runtime() }
     }
 
-    fn emit(&self) -> Emit where Self: Sized {
-        Emit {signal: self.runtime()}
+    fn emit(&self) -> PEmit where Self: Sized {
+        PEmit {signal: self.runtime()}
     }
 
-    fn present(&self) -> Present where Self: Sized {
-        Present {signal: self.runtime()}
+    fn present(&self) -> PPresent where Self: Sized {
+        PPresent {signal: self.runtime()}
     }
 }
 
 pub struct PureSignal {
-    runtime: SignalRuntimeRef
+    runtime: PSignalRuntimeRef
 }
 
 impl PureSignal {
     pub fn new() -> PureSignal {
-        let runtime = SignalRuntime {status: false, callbacks: vec!(), waiting_present: vec!()};
+        let runtime = PSignalRuntime {status: false, callbacks: vec!(), waiting_present: vec!()};
         PureSignal {
-            runtime: SignalRuntimeRef {signal_runtime: Arc::new(Mutex::new(runtime))}
+            runtime: PSignalRuntimeRef {signal_runtime: Arc::new(Mutex::new(runtime))}
         }
     }
 }
@@ -120,17 +120,17 @@ impl Clone for PureSignal {
     }
 }
 
-impl Signal for PureSignal {
-    fn runtime(&self) -> SignalRuntimeRef {
+impl PSignal for PureSignal {
+    fn runtime(&self) -> PSignalRuntimeRef {
         self.runtime.clone()
     }
 }
 
-pub struct AwaitImmediate {
-    signal: SignalRuntimeRef
+pub struct PAwaitImmediate {
+    signal: PSignalRuntimeRef
 }
 
-impl Process for AwaitImmediate {
+impl Process for PAwaitImmediate {
     type Value = ();
 
     fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
@@ -138,20 +138,20 @@ impl Process for AwaitImmediate {
     }
 }
 
-impl ProcessMut for AwaitImmediate {
+impl ProcessMut for PAwaitImmediate {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, ())> {
         let sig = self.signal.clone();
         self.signal.on_signal(runtime, |runtime: &mut Runtime, ()| {
-            next.call(runtime, ( AwaitImmediate {signal: sig}, ()))
+            next.call(runtime, (PAwaitImmediate {signal: sig}, ()))
         });
     }
 }
 
-pub struct Emit {
-    signal: SignalRuntimeRef
+pub struct PEmit {
+    signal: PSignalRuntimeRef
 }
 
-impl Process for Emit {
+impl Process for PEmit {
     type Value = ();
 
     fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
@@ -160,19 +160,19 @@ impl Process for Emit {
     }
 }
 
-impl ProcessMut for Emit {
+impl ProcessMut for PEmit {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, ())> {
         let sig = self.signal.clone();
         self.signal.emit(runtime);
-        next.call(runtime, (Emit {signal: sig}, ()))
+        next.call(runtime, (PEmit {signal: sig}, ()))
     }
 }
 
-pub struct Present {
-    signal: SignalRuntimeRef
+pub struct PPresent {
+    signal: PSignalRuntimeRef
 }
 
-impl Process for Present {
+impl Process for PPresent {
     type Value = bool;
 
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<bool> {
@@ -180,12 +180,12 @@ impl Process for Present {
     }
 }
 
-impl ProcessMut for Present {
+impl ProcessMut for PPresent {
 
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, bool)> {
         let sig = self.signal.clone();
         self.signal.test_present(runtime, move |runtime: &mut Runtime, status: bool| {
-            next.call(runtime, (Present{signal: sig}, status))
+            next.call(runtime, (PPresent {signal: sig}, status))
         });
     }
 }
