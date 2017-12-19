@@ -7,13 +7,11 @@ use super::*;
 //|_|    \__,_|_|  \___|____/|_|\__, |_| |_|\__,_|_|
 //                              |___/
 
-/// A shared pointer to a signal runtime.
 #[derive(Clone)]
 pub struct PSignalRuntimeRef {
     pub signal_runtime: Arc<Mutex<PSignalRuntime>>,
 }
 
-/// Runtime for pure signals.
 pub struct PSignalRuntime {
     callbacks: Vec<Box<Continuation<()>>>,
     waiting_present: Vec<Box<Continuation<bool>>>,
@@ -27,7 +25,6 @@ impl PSignalRuntime {
 }
 
 impl PSignalRuntimeRef {
-    /// Sets the signal as emitted for the current instant.
     fn emit(self, runtime: &mut Runtime) {
         {
             let sig_run = self.signal_runtime.clone();
@@ -50,7 +47,6 @@ impl PSignalRuntimeRef {
         }
     }
 
-    /// Calls `c` at the first cycle where the signal is present.
     fn on_signal<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
         let sig_run = self.signal_runtime.clone();
         let mut sig = sig_run.lock().unwrap();
@@ -81,13 +77,9 @@ impl PSignalRuntimeRef {
     }
 }
 
-/// A reactive signal.
 pub trait PSignal: 'static {
-    /// Returns a reference to the signal's runtime.
     fn runtime(&self) -> PSignalRuntimeRef;
 
-    /// Returns a process that waits for the next emission of the signal, current instant
-    /// included.
     fn await_immediate(&self) -> PAwaitImmediate where Self: Sized {
         PAwaitImmediate { signal: self.runtime() }
     }
@@ -181,7 +173,6 @@ impl Process for PPresent {
 }
 
 impl ProcessMut for PPresent {
-
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, bool)> {
         let sig = self.signal.clone();
         self.signal.test_present(runtime, move |runtime: &mut Runtime, status: bool| {

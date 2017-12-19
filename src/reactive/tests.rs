@@ -209,10 +209,10 @@ fn test_value_signal() {
     timeout_ms(|| {
         let s: ValueSignal<i32, i32> = ValueSignal::new(0, Box::new(|x, y| x + y));
 
-        assert_eq!(execute_process(join(s.emit(1).then(s.emit(5)), s.await())), ((), 6));
-        assert_eq!(execute_process(join(s.emit(1).then(s.emit(5).pause()), s.await())), ((), 1));
+        assert_eq!(execute_process(join(s.emit(value(1)).then(s.emit(value(5))), s.await())), ((), 6));
+        assert_eq!(execute_process(join(s.emit(value(1)).then(s.emit(value(5)).pause()), s.await())), ((), 1));
         assert_eq!(execute_process(join(
-            s.emit(2).then(s.emit(5).pause()).then(s.emit(15).pause()).then(s.emit(15).pause()).then(s.emit(15).pause()).then(s.emit(15).pause()).then(s.emit(15).pause()).then(s.emit(15).pause()),
+            s.emit(value(2)).then(s.emit(value(5)).pause()).then(s.emit(value(15)).pause()),
             join(
                 s.await(),
                 s.await().then(s.await())
@@ -220,4 +220,25 @@ fn test_value_signal() {
         )),
                    ((), 10));
     }, 1000);
+}
+
+#[test]
+fn test_unique_signal() {
+    let (s, s_consumer): (UniqueSignal<Vec<i32>, i32>, UniqueSignalConsumer<Vec<i32>, i32>) =
+        UniqueSignal::new(Box::new(|| vec![]),
+                          Box::new(|mut v, x| {
+                              v.push(x);
+                              v
+                          }));
+
+    assert_eq!(execute_process(join(s.emit(value(1)).then(s.emit(value(5))), s_consumer.await())), ((), vec![1, 5]));
+
+    let (s, s_consumer): (UniqueSignal<Vec<i32>, i32>, UniqueSignalConsumer<Vec<i32>, i32>) =
+        UniqueSignal::new(Box::new(|| vec![]),
+                          Box::new(|mut v, x| {
+                              v.push(x);
+                              v
+                          }));
+
+    assert_eq!(execute_process(join(s.emit(value(1)).then(s.emit(value(5)).pause()), s_consumer.await())), ((), vec![1]));
 }
