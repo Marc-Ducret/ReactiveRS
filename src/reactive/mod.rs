@@ -10,12 +10,14 @@ mod continuation;
 pub mod process;
 pub mod pure_signal;
 pub mod value_signal;
+pub mod unique_signal;
 mod tests;
 
 use self::continuation::*;
 use self::process::*;
 use self::pure_signal::*;
 use self::value_signal::*;
+use self::unique_signal::*;
 
 //  ____              _   _
 // |  _ \ _   _ _ __ | |_(_)_ __ ___   ___

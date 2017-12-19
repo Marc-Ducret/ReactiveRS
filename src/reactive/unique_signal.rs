@@ -1,20 +1,25 @@
 use super::*;
 
-// __     __    _            ____  _                   _
-// \ \   / /_ _| |_   _  ___/ ___|(_) __ _ _ __   __ _| |
-//  \ \ / / _` | | | | |/ _ \___ \| |/ _` | '_ \ / _` | |
-//   \ V / (_| | | |_| |  __/___) | | (_| | | | | (_| | |
-//    \_/ \__,_|_|\__,_|\___|____/|_|\__, |_| |_|\__,_|_|
-//                                   |___/
+// _   _       _                  ____  _                   _
+//| | | |_ __ (_) __ _ _   _  ___/ ___|(_) __ _ _ __   __ _| |
+//| | | | '_ \| |/ _` | | | |/ _ \___ \| |/ _` | '_ \ / _` | |
+//| |_| | | | | | (_| | |_| |  __/___) | | (_| | | | | (_| | |
+// \___/|_| |_|_|\__, |\__,_|\___|____/|_|\__, |_| |_|\__,_|_|
+//                  |_|                   |___/
 
 /// A shared pointer to a signal runtime.
-#[derive(Clone)]
-pub struct VSignalRuntimeRef<V, G> where V: Clone + 'static, G: Clone + 'static {
-    signal_runtime: Arc<Mutex<VSignalRuntime<V, G>>>,
+pub struct USignalRuntimeRef<V, G> where V: Sized + 'static, G: Clone + 'static {
+    signal_runtime: Arc<Mutex<USignalRuntime<V, G>>>,
+}
+
+impl<V, G> Clone for USignalRuntimeRef<V, G> where V: Sized + 'static, G: Clone + 'static {
+    fn clone(&self) -> Self {
+        USignalRuntimeRef{signal_runtime: self.signal_runtime.clone()}
+    }
 }
 
 /// Runtime for pure signals.
-struct VSignalRuntime<V, G> where V: Clone + 'static, G: Clone + 'static {
+struct USignalRuntime<V, G> where V: Sized + 'static, G: Clone + 'static {
     callbacks: Vec<Box<Continuation<()>>>,
     waiting_present: Vec<Box<Continuation<bool>>>,
     waiting_await: Vec<Box<Continuation<V>>>,
@@ -24,13 +29,13 @@ struct VSignalRuntime<V, G> where V: Clone + 'static, G: Clone + 'static {
     current_value: V,
 }
 
-impl<V, G> VSignalRuntime<V, G> where V: Clone + 'static, G: Clone + 'static {
+impl<V, G> USignalRuntime<V, G> where V: Sized + 'static, G: Clone + 'static {
     fn add_callback<C>(&mut self, c: C) where C: Continuation<()> {
         self.callbacks.push(Box::new(c));
     }
 }
 
-impl<V, G> VSignalRuntimeRef<V, G> where V: Clone + 'static, G: Clone + 'static {
+impl<V, G> USignalRuntimeRef<V, G> where V: Sized + 'static, G: Clone + 'static {
     /// Sets the signal as emitted for the current instant.
     fn emit(self, runtime: &mut Runtime, value: G) {
         {
@@ -51,12 +56,12 @@ impl<V, G> VSignalRuntimeRef<V, G> where V: Clone + 'static, G: Clone + 'static 
             runtime.on_end_of_instant(Box::new(move |runtime: &mut Runtime, ()| {
                 let mut sig = sig_run.lock().unwrap();
                 while let Some(c) = sig.waiting_await.pop() {
-                    let value = sig.current_value.clone();
-                    runtime.on_current_instant(Box::new(move |runtime: &mut Runtime, ()| {
-                       c.call_box(runtime, value);
-                    }));
+//                    let value = sig.current_value.clone();
+//                    runtime.on_current_instant(Box::new(move |runtime: &mut Runtime, ()| {
+//                       c.call_box(runtime, value);
+//                    }));
                 }
-                sig.current_value = sig.default_value.clone();
+                sig.current_value = sig.default_value;
                 sig.status = false;
             }))
         }
@@ -100,67 +105,67 @@ impl<V, G> VSignalRuntimeRef<V, G> where V: Clone + 'static, G: Clone + 'static 
 }
 
 /// A reactive signal.
-pub trait VSignal<V, G>: 'static where V: Clone + 'static, G: Clone + 'static {
+pub trait USignal<V, G>: 'static where V: Sized + 'static, G: Clone + 'static {
     /// Returns a reference to the signal's runtime.
-    fn runtime(&self) -> VSignalRuntimeRef<V, G>;
+    fn runtime(&self) -> USignalRuntimeRef<V, G>;
 
     /// Returns a process that waits for the next emission of the signal, current instant
     /// included.
-    fn await_immediate(&self) -> VAwaitImmediate<V, G> where Self: Sized {
-        VAwaitImmediate {signal: self.runtime()}
+    fn await_immediate(&self) -> UAwaitImmediate<V, G> where Self: Sized {
+        UAwaitImmediate {signal: self.runtime()}
     }
 
     fn await(&self) -> VAwait<V, G> where Self: Sized {
         VAwait {signal: self.runtime()}
     }
 
-    fn emit(&self, value: G) -> VEmit<V, G> where Self: Sized {
-        VEmit {signal: self.runtime(), value}
+    fn emit(&self, value: G) -> UEmit<V, G> where Self: Sized {
+        UEmit {signal: self.runtime(), value}
     }
 
-    fn present(&self) -> VPresent<V, G> where Self: Sized {
-        VPresent {signal: self.runtime()}
+    fn present(&self) -> UPresent<V, G> where Self: Sized {
+        UPresent {signal: self.runtime()}
     }
 }
 
-pub struct ValueSignal<V, G> where V: Clone + 'static, G: Clone + 'static {
-    runtime: VSignalRuntimeRef<V, G>
+pub struct UniqueSignal<V, G> where V: Sized + 'static, G: Clone + 'static {
+    runtime: USignalRuntimeRef<V, G>
 }
 
-impl<V, G> ValueSignal<V, G> where V: Clone + 'static, G: Clone + 'static {
-    pub fn new(default_value: V, gather: Box<Fn(V, G) -> V>) -> ValueSignal<V, G> {
-        let runtime = VSignalRuntime {
+impl<V, G> UniqueSignal<V, G> where V: Sized + 'static, G: Clone + 'static {
+    pub fn new(default_value: V, gather: Box<Fn(V, G) -> V>) -> UniqueSignal<V, G> {
+        let runtime = USignalRuntime {
             status: false,
             callbacks: vec!(),
             waiting_present: vec!(),
             waiting_await: vec!(),
-            current_value: default_value.clone(),
+            current_value: default_value,
             default_value,
             gather,
         };
-        ValueSignal {
-            runtime: VSignalRuntimeRef {signal_runtime: Arc::new(Mutex::new(runtime))}
+        UniqueSignal {
+            runtime: USignalRuntimeRef {signal_runtime: Arc::new(Mutex::new(runtime))}
         }
     }
 }
 
-impl<V, G> Clone for ValueSignal<V, G> where V: Clone + 'static, G: Clone + 'static {
+impl<V, G> Clone for UniqueSignal<V, G> where V: Sized + 'static, G: Clone + 'static {
     fn clone(&self) -> Self {
-        ValueSignal {runtime: self.runtime.clone()}
+        UniqueSignal {runtime: self.runtime.clone()}
     }
 }
 
-impl<V, G> VSignal<V, G> for ValueSignal<V, G> where V: Clone + 'static, G: Clone + 'static {
-    fn runtime(&self) -> VSignalRuntimeRef<V, G> {
+impl<V, G> USignal<V, G> for UniqueSignal<V, G> where V: Sized + 'static, G: Clone + 'static {
+    fn runtime(&self) -> USignalRuntimeRef<V, G> {
         self.runtime.clone()
     }
 }
 
-pub struct VAwaitImmediate<V, G> where V: Clone + 'static, G: Clone + 'static  {
-    signal: VSignalRuntimeRef<V, G>
+pub struct UAwaitImmediate<V, G> where V: Sized + 'static, G: Clone + 'static  {
+    signal: USignalRuntimeRef<V, G>
 }
 
-impl<V, G> Process for VAwaitImmediate<V, G> where V: Clone + 'static, G: Clone + 'static {
+impl<V, G> Process for UAwaitImmediate<V, G> where V: Sized + 'static, G: Clone + 'static {
     type Value = ();
 
     fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
@@ -168,20 +173,20 @@ impl<V, G> Process for VAwaitImmediate<V, G> where V: Clone + 'static, G: Clone 
     }
 }
 
-impl<V, G> ProcessMut for VAwaitImmediate<V, G> where V: Clone + 'static, G: Clone + 'static {
+impl<V, G> ProcessMut for UAwaitImmediate<V, G> where V: Sized + 'static, G: Clone + 'static {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, ())> {
         let sig = self.signal.clone();
         self.signal.on_signal(runtime, |runtime: &mut Runtime, ()| {
-            next.call(runtime, (VAwaitImmediate {signal: sig}, ()))
+            next.call(runtime, (UAwaitImmediate {signal: sig}, ()))
         });
     }
 }
 
-pub struct VAwait<V, G> where V: Clone + 'static, G: Clone + 'static  {
-    signal: VSignalRuntimeRef<V, G>
+pub struct VAwait<V, G> where V: Sized + 'static, G: Clone + 'static  {
+    signal: USignalRuntimeRef<V, G>
 }
 
-impl<V, G> Process for VAwait<V, G> where V: Clone + 'static, G: Clone + 'static {
+impl<V, G> Process for VAwait<V, G> where V: Sized + 'static, G: Clone + 'static {
     type Value = V;
 
     fn call<C>(self, _: &mut Runtime, c: C) where C: Continuation<V> {
@@ -189,7 +194,7 @@ impl<V, G> Process for VAwait<V, G> where V: Clone + 'static, G: Clone + 'static
     }
 }
 
-impl<V, G> ProcessMut for VAwait<V, G> where V: Clone + 'static, G: Clone + 'static {
+impl<V, G> ProcessMut for VAwait<V, G> where V: Sized + 'static, G: Clone + 'static {
     fn call_mut<C>(self, _: &mut Runtime, next: C) where C: Continuation<(Self, V)> {
         let sig = self.signal.clone();
         self.signal.await(|runtime: &mut Runtime, v| {
@@ -198,12 +203,12 @@ impl<V, G> ProcessMut for VAwait<V, G> where V: Clone + 'static, G: Clone + 'sta
     }
 }
 
-pub struct VEmit<V, G> where V: Clone + 'static, G: Clone + 'static {
-    signal: VSignalRuntimeRef<V, G>,
+pub struct UEmit<V, G> where V: Sized + 'static, G: Clone + 'static {
+    signal: USignalRuntimeRef<V, G>,
     value: G,
 }
 
-impl<V, G> Process for VEmit<V, G> where V: Clone + 'static, G: Clone + 'static {
+impl<V, G> Process for UEmit<V, G> where V: Sized + 'static, G: Clone + 'static {
     type Value = ();
 
     fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
@@ -212,20 +217,20 @@ impl<V, G> Process for VEmit<V, G> where V: Clone + 'static, G: Clone + 'static 
     }
 }
 
-impl<V, G> ProcessMut for VEmit<V, G> where V: Clone + 'static, G: Clone + 'static {
+impl<V, G> ProcessMut for UEmit<V, G> where V: Sized + 'static, G: Clone + 'static {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, ())> {
         let sig = self.signal.clone();
         let val = self.value.clone();
         self.signal.emit(runtime, self.value);
-        next.call(runtime, (VEmit {signal: sig, value: val}, ()))
+        next.call(runtime, (UEmit {signal: sig, value: val}, ()))
     }
 }
 
-pub struct VPresent<V, G> where V: Clone + 'static, G: Clone + 'static {
-    signal: VSignalRuntimeRef<V, G>
+pub struct UPresent<V, G> where V: Sized + 'static, G: Clone + 'static {
+    signal: USignalRuntimeRef<V, G>
 }
 
-impl<V, G> Process for VPresent<V, G> where V: Clone + 'static, G: Clone + 'static {
+impl<V, G> Process for UPresent<V, G> where V: Sized + 'static, G: Clone + 'static {
     type Value = bool;
 
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<bool> {
@@ -233,12 +238,12 @@ impl<V, G> Process for VPresent<V, G> where V: Clone + 'static, G: Clone + 'stat
     }
 }
 
-impl<V, G> ProcessMut for VPresent<V, G> where V: Clone + 'static, G: Clone + 'static {
+impl<V, G> ProcessMut for UPresent<V, G> where V: Sized + 'static, G: Clone + 'static {
 
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, bool)> {
         let sig = self.signal.clone();
         self.signal.test_present(runtime, move |runtime: &mut Runtime, status: bool| {
-            next.call(runtime, (VPresent {signal: sig}, status))
+            next.call(runtime, (UPresent {signal: sig}, status))
         });
     }
 }
