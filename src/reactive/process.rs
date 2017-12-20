@@ -240,6 +240,63 @@ impl<P1, P2> Process for Join<P1, P2> where P1: Process, P2: Process {
     }
 }
 
+impl<P1, P2> ProcessMut for Join<P1, P2> where P1: ProcessMut, P2: ProcessMut {
+    fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
+        struct JoinPoint<T1, T2, P1, P2, C> {
+            x1: Option<T1>,
+            x2: Option<T2>,
+            op1: Option<P1>,
+            op2: Option<P2>,
+            next: Option<C>
+        }
+
+        impl<T1, T2, P1, P2, C> JoinPoint<T1, T2, P1, P2, C> where C: Continuation<(Join<P1, P2>, (T1, T2))> {
+            fn call_continuation(&mut self, run: &mut Runtime, mut op1: Option<P1>, mut op2: Option<P2>) {
+                if op1.is_some() {
+                    self.op1 = op1.take();
+                }
+                if op2.is_some() {
+                    self.op2 = op2.take();
+                }
+                if self.x1.is_some() {
+                    if self.x2.is_some() {
+                        let next = self.next.take();
+                        let x1 = self.x1.take();
+                        let x2 = self.x2.take();
+                        let op1 = self.op1.take();
+                        let op2 = self.op2.take();
+                        if let Some(y1) = x1 {
+                            if let Some(y2) = x2 {
+                                if let Some(cont) = next {
+                                    if let Some(p1) = op1 {
+                                        if let Some(p2) = op2 {
+                                            cont.call(run, (Join {p1, p2}, (y1, y2)));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        let jp = Rc::new(RefCell::new(JoinPoint{x1: None, x2: None, op1: None, op2: None, next: Some(next)}));
+
+        let jp1 = jp.clone();
+        self.p1.call_mut(runtime, move |run: &mut Runtime, (p1, x1)| {
+            jp1.borrow_mut().x1 = Some(x1);
+            jp1.borrow_mut().call_continuation(run, Some(p1), None)
+        });
+
+        let jp2 = jp.clone();
+        self.p2.call_mut(runtime, move |run: &mut Runtime, (p2, x2)| {
+            jp2.borrow_mut().x2 = Some(x2);
+            jp2.borrow_mut().call_continuation(run, None, Some(p2))
+        });
+    }
+}
+
 pub fn join<P1, P2>(p1: P1, p2: P2) -> Join<P1, P2> {
     Join {p1, p2}
 }
