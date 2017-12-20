@@ -223,22 +223,32 @@ fn test_value_signal() {
 }
 
 #[test]
-fn test_unique_signal() {
-    let (s, s_consumer): (UniqueSignal<Vec<i32>, i32>, UniqueSignalConsumer<Vec<i32>, i32>) =
-        UniqueSignal::new(Box::new(|| vec![]),
-                          Box::new(|mut v, x| {
-                              v.push(x);
-                              v
-                          }));
+fn test_unique_consumer_signal() {
+    let (s_prod, s_cons): (UniqueConsumerSignalProducer<Vec<i32>, i32>, UniqueConsumerSignalConsumer<Vec<i32>, i32>) =
+        UniqueConsumerSignalProducer::new(
+            Box::new(|| vec![]),
+            Box::new(|mut v, x| {
+                v.push(x);
+                v
+            }));
 
-    assert_eq!(execute_process(join(s.emit(value(1)).then(s.emit(value(5))), s_consumer.await())), ((), vec![1, 5]));
+    assert_eq!(execute_process(join(s_prod.emit(value(1)).then(s_prod.emit(value(5))), s_cons.await())), ((), vec![1, 5]));
 
-    let (s, s_consumer): (UniqueSignal<Vec<i32>, i32>, UniqueSignalConsumer<Vec<i32>, i32>) =
-        UniqueSignal::new(Box::new(|| vec![]),
-                          Box::new(|mut v, x| {
-                              v.push(x);
-                              v
-                          }));
+    let (s_prod, s_cons): (UniqueConsumerSignalProducer<Vec<i32>, i32>, UniqueConsumerSignalConsumer<Vec<i32>, i32>) =
+        UniqueConsumerSignalProducer::new(
+            Box::new(|| vec![]),
+            Box::new(|mut v, x| {
+              v.push(x);
+              v
+            }));
 
-    assert_eq!(execute_process(join(s.emit(value(1)).then(s.emit(value(5)).pause()), s_consumer.await())), ((), vec![1]));
+    assert_eq!(execute_process(join(s_prod.emit(value(1)).then(s_prod.emit(value(5)).pause()), s_cons.await())), ((), vec![1]));
+}
+
+#[test]
+fn test_unique_producer_signal() {
+    let (s_prod, s_cons): (UniqueProducerSignalProducer<i32>, UniqueProducerSignalConsumer<i32>) =
+        UniqueProducerSignalProducer::new(0);
+
+    assert_eq!(execute_process(join(s_prod.emit(value(1)), join(s_cons.await_immediate(), s_cons.await_immediate()))), ((), (1, 1)));
 }
