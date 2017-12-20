@@ -110,6 +110,9 @@ impl<V, G> USignalRuntimeRef<V, G> where V: Sized + 'static, G: 'static {
 pub trait USignal<V, G>: 'static where V: Sized + 'static, G: 'static {
     fn runtime(&self) -> USignalRuntimeRef<V, G>;
 
+    fn await_immediate(&self) -> UAwaitImmediate<V, G> where Self: Sized {
+        UAwaitImmediate {signal: self.runtime()}
+    }
 
     fn emit<P>(&self, value: P) -> UEmit<V, G, P> where Self: Sized, P: Process<Value = G> {
         UEmit {signal: self.runtime(), value}
