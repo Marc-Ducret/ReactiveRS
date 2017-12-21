@@ -26,12 +26,12 @@ impl SequentialRuntime {
     }
 }
 
-impl Runtime for SequentialRuntime {
-    fn execute(&mut self) {
+impl SequentialRuntime {
+    pub fn execute(&mut self) {
         while self.instant() {}
     }
 
-    fn instant(&mut self) -> bool {
+    pub fn instant(&mut self) -> bool {
         while let Some(cont) = self.current_instant.pop() {
             cont.call_box(self, ());
         }
@@ -45,7 +45,9 @@ impl Runtime for SequentialRuntime {
             || (!self.end_instant.is_empty())
             || (!self.next_end_instant.is_empty())
     }
+}
 
+impl Runtime for SequentialRuntime {
     fn on_current_instant(&mut self, c: Box<Continuation<()>>) {
         self.current_instant.push(c);
     }

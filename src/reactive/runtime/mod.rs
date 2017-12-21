@@ -10,10 +10,6 @@ pub mod parallel_runtime;
 // |_| \_\\__,_|_| |_|\__|_|_| |_| |_|\___|
 
 pub trait Runtime: Send {
-    fn execute(&mut self);
-
-    fn instant(&mut self) -> bool;
-
     fn on_current_instant(&mut self, c: Box<Continuation<()>>);
 
     fn on_next_instant(&mut self, c: Box<Continuation<()>>);

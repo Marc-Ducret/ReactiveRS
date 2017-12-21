@@ -27,8 +27,15 @@ impl ParallelRuntime {
     }
 }
 
-impl Runtime for ParallelRuntime {
-    fn execute(&mut self) {
+impl ParallelRuntime {
+    pub fn execute(&mut self) {
+        let workers_count = 12;
+        let workers = Vec::with_capacity(workers_count);
+        for _ in 0..workers_count {
+            workers.push(thread::spawn(move|| {
+
+            }));
+        }
         while self.instant() {}
     }
 
@@ -46,7 +53,9 @@ impl Runtime for ParallelRuntime {
             || (!self.end_instant.is_empty())
             || (!self.next_end_instant.is_empty())
     }
+}
 
+impl Runtime for ParallelRuntime {
     fn on_current_instant(&mut self, c: Box<Continuation<()>>) {
         self.current_instant.push(c);
     }

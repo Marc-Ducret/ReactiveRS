@@ -262,8 +262,9 @@ fn test_parallel_continuation() {
     let cont_wait = Box::new(cont_print.pause());
     runtime.on_current_instant(cont_wait);
     assert_eq!(*n.lock().unwrap(), 0);
-    assert!(runtime.instant());
-    assert_eq!(*n.lock().unwrap(), 0);
-    assert!(!runtime.instant());
+//    assert!(runtime.instant());
+//    assert_eq!(*n.lock().unwrap(), 0);
+//    assert!(!runtime.instant());
+    runtime.execute();
     assert_eq!(*n.lock().unwrap(), 42);
 }
