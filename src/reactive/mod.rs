@@ -49,10 +49,7 @@ impl Runtime {
 
     /// Executes instants until all work is completed.
     pub fn execute(&mut self) {
-        while self.instant() {
-//            thread::sleep(time::Duration::from_millis(100));
-//            println!("%instant%")
-        }
+        while self.instant() {}
     }
 
     /// Executes a single instant to completion. Indicates if more work remains to be done.
