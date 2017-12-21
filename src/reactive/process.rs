@@ -106,6 +106,26 @@ pub fn execute_process<P>(p: P) -> P::Value where P: Process {
     }
 }
 
+pub fn execute_process_par<P>(p: P) -> P::Value where P: Process {
+    let runtime = ParallelRuntime::new(12);
+    let result = Arc::new(Mutex::new(None));
+    let result_ref = result.clone();
+    runtime.on_current_instant(Box::new(|run: &mut Runtime, _|
+        p.call(run, move |_: &mut Runtime, val| {
+            let mut res = result_ref.lock().unwrap();
+            *res = Some(val);
+        })
+    ));
+    runtime.execute();
+    let mut res = None;
+    std::mem::swap(&mut res, &mut *result.lock().unwrap());
+    if let Some(res) = res {
+        return res;
+    } else {
+        panic!("No result from execute?! (result continuation was probably lost)");
+    }
+}
+
 pub struct Value<T> {
     val: T
 }

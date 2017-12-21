@@ -2,10 +2,11 @@ extern crate reactive_rs;
 
 use reactive_rs::reactive::process::*;
 use reactive_rs::reactive::signal::pure_signal::*;
+use reactive_rs::reactive::signal::value_signal::*;
 
 use std::{thread, time};
 
-fn main() {
+fn _main() {
     let s = PureSignal::new();
 
     let continu: LoopStatus<()> = LoopStatus::Continue;
@@ -25,4 +26,17 @@ fn main() {
     let r = s.await_immediate().map(print_received).then(value(continu).pause()).while_loop();
 
     execute_process(join(p, join(q, r)));
+}
+
+fn main() {
+    let s = ValueSignal::new(0, Box::new(|x, y| x+y));
+
+    let conti: LoopStatus<()> = LoopStatus::Continue;
+    let p = s.emit(value(1)).then(value(conti).pause()).while_loop();
+    let print = |x| {
+        println!("x = {}", x);
+        x
+    };
+    let q = s.emit(s.await().map(print)).then(value(conti)).while_loop();
+    execute_process_par(join(p, q));
 }
