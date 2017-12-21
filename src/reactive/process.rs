@@ -8,9 +8,9 @@ use super::*;
 
 
 /// A reactive process.
-pub trait Process: 'static {
+pub trait Process: Send + Sync + 'static {
     /// The value created by the process.
-    type Value;
+    type Value: Send + Sync;
 
     /// Executes the reactive process in the runtime, calls `next` with the resulting value.
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value>;
@@ -27,7 +27,7 @@ pub trait Process: 'static {
         Flatten { process: self }
     }
 
-    fn and_then<F, P>(self, then: F) -> Flatten<Map<Self, F>> where Self: Sized, F: Fn(Self::Value) -> P + 'static, P: Process {
+    fn and_then<F, P>(self, then: F) -> Flatten<Map<Self, F>> where Self: Sized, F: Fn(Self::Value) -> P + Send + Sync + 'static, P: Process {
         self.map(then).flatten()
     }
 
@@ -77,7 +77,7 @@ pub trait ProcessMut: Process {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where
         Self: Sized, C: Continuation<(Self, Self::Value)>;
 
-    fn while_loop<V>(self) -> While<Self> where Self: ProcessMut<Value = LoopStatus<V>>, Self: Sized {
+    fn while_loop<V>(self) -> While<Self> where Self: ProcessMut<Value = LoopStatus<V>>, Self: Sized, V: Send + Sync {
         While {process: self}
     }
 }
@@ -88,15 +88,18 @@ pub enum LoopStatus<V> { Continue, Exit(V) }
 
 pub fn execute_process<P>(p: P) -> P::Value where P: Process {
     let mut runtime = SequentialRuntime::new();
-    let result = Rc::new(Cell::new(None));
+    let result = Arc::new(Mutex::new(None));
     let result_ref = result.clone();
     runtime.on_current_instant(Box::new(|run: &mut Runtime, _|
         p.call(run, move |_: &mut Runtime, val| {
-            result_ref.set(Some(val))
+            let mut res = result_ref.lock().unwrap();
+            *res = Some(val);
         })
     ));
     runtime.execute();
-    if let Some(res) = result.replace(None) {
+    let mut res = None;
+    std::mem::swap(&mut res, &mut *result.lock().unwrap());
+    if let Some(res) = res {
         return res;
     } else {
         panic!("No result from execute?! (result continuation was probably lost)");
@@ -107,14 +110,14 @@ pub struct Value<T> {
     val: T
 }
 
-impl<T: 'static> Process for Value<T> {
+impl<T: 'static> Process for Value<T> where T: Send + Sync {
     type Value = T;
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
         next.call(runtime, self.val)
     }
 }
 
-impl<T: 'static> ProcessMut for Value<T> where T: Copy {
+impl<T: 'static> ProcessMut for Value<T> where T: Copy + Send + Sync {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
         let v = self.val.clone();
         next.call(runtime, (self, v))
@@ -152,7 +155,7 @@ impl<P> ProcessMut for Flatten<P>
 pub struct Map<P, F> { process: P, map: F }
 
 impl<F, V, P> Process for Map<P, F>
-    where P: Process, F: FnOnce(P::Value) -> V + 'static  {
+    where P: Process, F: FnOnce(P::Value) -> V + Send + Sync + 'static, V: Send + Sync  {
     type Value = V;
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
         //self.continuation is a process
@@ -162,7 +165,7 @@ impl<F, V, P> Process for Map<P, F>
 }
 
 impl<F, V, P> ProcessMut for Map<P, F>
-    where P: ProcessMut, F: FnMut(P::Value) -> V + 'static  {
+    where P: ProcessMut, F: FnMut(P::Value) -> V + Send + Sync + 'static, V: Send + Sync  {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
         //self.continuation is a process
         let mut f: F = self.map;
@@ -199,13 +202,13 @@ pub struct Join<P1, P2> { p1: P1, p2: P2 }
 impl<P1, P2> Process for Join<P1, P2> where P1: Process, P2: Process {
     type Value = (P1::Value, P2::Value);
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
-        struct JoinPoint<T1, T2, C> {
+        struct JoinPoint<T1, T2, C> where T1: Send + Sync, T2: Send + Sync {
             x1: Option<T1>,
             x2: Option<T2>,
             next: Option<C>
         }
 
-        impl<T1, T2, C> JoinPoint<T1, T2, C> where C: Continuation<(T1, T2)> {
+        impl<T1, T2, C> JoinPoint<T1, T2, C> where C: Continuation<(T1, T2)>, T1: Send + Sync, T2: Send + Sync {
             fn call_continuation(&mut self, run: &mut Runtime) {
                 if self.x1.is_some() {
                     if self.x2.is_some() {
@@ -224,25 +227,31 @@ impl<P1, P2> Process for Join<P1, P2> where P1: Process, P2: Process {
             }
         };
 
-        let jp = Rc::new(RefCell::new(JoinPoint{x1: None, x2: None, next: Some(next)}));
+        let jp = Arc::new(Mutex::new(JoinPoint{x1: None, x2: None, next: Some(next)}));
 
-        let jp1 = jp.clone();
-        self.p1.call(runtime, move |run: &mut Runtime, x1| {
-            jp1.borrow_mut().x1 = Some(x1);
-            jp1.borrow_mut().call_continuation(run)
-        });
+        {
+            let jp = jp.clone();
+            self.p1.call(runtime, move |run: &mut Runtime, x1| {
+                let mut jp = jp.lock().unwrap();
+                jp.x1 = Some(x1);
+                jp.call_continuation(run)
+            });
+        }
 
-        let jp2 = jp.clone();
-        self.p2.call(runtime, move |run: &mut Runtime, x2| {
-            jp2.borrow_mut().x2 = Some(x2);
-            jp2.borrow_mut().call_continuation(run)
-        });
+        {
+            let jp = jp.clone();
+            self.p2.call(runtime, move |run: &mut Runtime, x2| {
+                let mut jp = jp.lock().unwrap();
+                jp.x2 = Some(x2);
+                jp.call_continuation(run)
+            });
+        }
     }
 }
 
 impl<P1, P2> ProcessMut for Join<P1, P2> where P1: ProcessMut, P2: ProcessMut {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
-        struct JoinPoint<T1, T2, P1, P2, C> {
+        struct JoinPoint<T1, T2, P1, P2, C> where P1: ProcessMut, P2: ProcessMut {
             x1: Option<T1>,
             x2: Option<T2>,
             op1: Option<P1>,
@@ -250,7 +259,7 @@ impl<P1, P2> ProcessMut for Join<P1, P2> where P1: ProcessMut, P2: ProcessMut {
             next: Option<C>
         }
 
-        impl<T1, T2, P1, P2, C> JoinPoint<T1, T2, P1, P2, C> where C: Continuation<(Join<P1, P2>, (T1, T2))> {
+        impl<T1, T2, P1, P2, C> JoinPoint<T1, T2, P1, P2, C> where C: Continuation<(Join<P1, P2>, (T1, T2))>, P1: ProcessMut, P2: ProcessMut, T1: Send + Sync, T2: Send + Sync {
             fn call_continuation(&mut self, run: &mut Runtime, mut op1: Option<P1>, mut op2: Option<P2>) {
                 if op1.is_some() {
                     self.op1 = op1.take();
@@ -281,19 +290,26 @@ impl<P1, P2> ProcessMut for Join<P1, P2> where P1: ProcessMut, P2: ProcessMut {
             }
         };
 
-        let jp = Rc::new(RefCell::new(JoinPoint{x1: None, x2: None, op1: None, op2: None, next: Some(next)}));
+        let jp = Arc::new(Mutex::new(JoinPoint{x1: None, x2: None, op1: None, op2: None, next: Some(next)}));
 
-        let jp1 = jp.clone();
-        self.p1.call_mut(runtime, move |run: &mut Runtime, (p1, x1)| {
-            jp1.borrow_mut().x1 = Some(x1);
-            jp1.borrow_mut().call_continuation(run, Some(p1), None)
-        });
 
-        let jp2 = jp.clone();
-        self.p2.call_mut(runtime, move |run: &mut Runtime, (p2, x2)| {
-            jp2.borrow_mut().x2 = Some(x2);
-            jp2.borrow_mut().call_continuation(run, None, Some(p2))
-        });
+        {
+            let jp = jp.clone();
+            self.p1.call_mut(runtime, move |run: &mut Runtime, (p1, x1)| {
+                let mut jp = jp.lock().unwrap();
+                jp.x1 = Some(x1);
+                jp.call_continuation(run, Some(p1), None)
+            });
+        }
+
+        {
+            let jp = jp.clone();
+            self.p2.call_mut(runtime, move |run: &mut Runtime, (p2, x2)| {
+                let mut jp = jp.lock().unwrap();
+                jp.x2 = Some(x2);
+                jp.call_continuation(run, None, Some(p2))
+            });
+        }
     }
 }
 
@@ -305,7 +321,7 @@ pub struct While<P> {
     process: P
 }
 
-impl<P, V> Process for While<P> where P: ProcessMut<Value = LoopStatus<V>>, V: 'static {
+impl<P, V> Process for While<P> where P: ProcessMut<Value = LoopStatus<V>>, V: Send + Sync + 'static {
     type Value = V;
 
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
@@ -328,7 +344,7 @@ pub struct If<P, Q, R> {
     process_cond: R,
 }
 
-impl<P, Q, R, V> Process for If<P, Q, R> where P: Process<Value = V>, Q: Process<Value = V>, R: Process<Value = bool> {
+impl<P, Q, R, V> Process for If<P, Q, R> where P: Process<Value = V>, Q: Process<Value = V>, R: Process<Value = bool>, V: Send + Sync {
     type Value = V;
 
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<V> {
@@ -345,7 +361,7 @@ impl<P, Q, R, V> Process for If<P, Q, R> where P: Process<Value = V>, Q: Process
     }
 }
 
-impl<P, Q, R, V> ProcessMut for If<P, Q, R> where P: ProcessMut<Value = V>, Q: ProcessMut<Value = V>, R: ProcessMut<Value = bool> {
+impl<P, Q, R, V> ProcessMut for If<P, Q, R> where P: ProcessMut<Value = V>, Q: ProcessMut<Value = V>, R: ProcessMut<Value = bool>, V: Send + Sync {
 
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, V)> {
         let p = self.process_if;

@@ -13,71 +13,71 @@ use super::*;
 
 
 #[test]
-fn question2() {
-    let n = Rc::new(RefCell::new(0));
+fn test_continuation() {
+    let n = Arc::new(Mutex::new(0));
     let nn = n.clone();
     let mut runtime = SequentialRuntime::new();
-    let cont_print = Box::new(move |_run :&mut Runtime, ()| *nn.borrow_mut() = 42);
+    let cont_print = Box::new(move |_run :&mut Runtime, ()| *nn.lock().unwrap() = 42);
     let cont_wait = Box::new(|run :&mut Runtime, ()| run.on_next_instant(cont_print));
     runtime.on_current_instant(cont_wait);
-    assert_eq!(*n.borrow(), 0);
+    assert_eq!(*n.lock().unwrap(), 0);
     assert!(runtime.instant());
-    assert_eq!(*n.borrow(), 0);
+    assert_eq!(*n.lock().unwrap(), 0);
     assert!(!runtime.instant());
-    assert_eq!(*n.borrow(), 42);
+    assert_eq!(*n.lock().unwrap(), 42);
 }
 
 #[test]
-fn question5() {
-    let n = Rc::new(RefCell::new(0));
+fn test_continuation_pause() {
+    let n = Arc::new(Mutex::new(0));
     let nn = n.clone();
     let mut runtime = SequentialRuntime::new();
-    let cont_print = Box::new(move |_run :&mut Runtime, ()| *nn.borrow_mut() = 42);
+    let cont_print = Box::new(move |_run :&mut Runtime, ()| *nn.lock().unwrap() = 42);
     let cont_wait = Box::new(cont_print.pause());
     runtime.on_current_instant(cont_wait);
-    assert_eq!(*n.borrow(), 0);
+    assert_eq!(*n.lock().unwrap(), 0);
     assert!(runtime.instant());
-    assert_eq!(*n.borrow(), 0);
+    assert_eq!(*n.lock().unwrap(), 0);
     assert!(!runtime.instant());
-    assert_eq!(*n.borrow(), 42);
+    assert_eq!(*n.lock().unwrap(), 42);
 }
 
 #[test]
-fn test_flatten() {
-    let n = Rc::new(RefCell::new(0));
+fn test_process_flatten() {
+    let n = Arc::new(Mutex::new(0));
     let nn = n.clone();
     let mut runtime = SequentialRuntime::new();
     let p = value(value(42));
 
-    assert_eq!(*n.borrow(), 0);
-    p.flatten().call(&mut runtime, move |_: &mut Runtime, val| *nn.borrow_mut() = val);
-    assert_eq!(*n.borrow(), 42);
+    assert_eq!(*n.lock().unwrap(), 0);
+    p.flatten().call(&mut runtime, move |_: &mut Runtime, val| *nn.lock().unwrap() = val);
+    assert_eq!(*n.lock().unwrap(), 42);
 }
 
 #[test]
-fn test_pause_process() {
-    let n = Rc::new(RefCell::new(0));
+fn test_process_pause() {
+    let n = Arc::new(Mutex::new(0));
     let nn = n.clone();
     let p = value(42).pause().map(move |val| {
-        *nn.borrow_mut() = val;
+        *nn.lock().unwrap() = val;
     });
 
-    assert_eq!(*n.borrow(), 0);
+    assert_eq!(*n.lock().unwrap(), 0);
     execute_process(p);
-    assert_eq!(*n.borrow(), 42);
+    assert_eq!(*n.lock().unwrap(), 42);
 }
 
 #[test]
-fn test_join_process() {
-    let n = Rc::new(RefCell::new((0, 0)));
+fn test_process_join() {
+    let n = Arc::new(Mutex::new((0, 0)));
     let nn = n.clone();
     let p = join(value(42), value(1337)).map(move |val| {
-        *nn.borrow_mut() = val;
+        *nn.lock().unwrap() = val;
     });
 
-    assert_eq!(*n.borrow(), (0, 0));
+    assert_eq!(*n.lock().unwrap(), (0, 0));
     execute_process(p);
-    assert_eq!(*n.borrow(), (42, 1337));
+    assert_eq!(*n.lock().unwrap(), (42, 1337));
 }
 
 
@@ -88,11 +88,11 @@ fn test_process_return() {
 
 #[test]
 fn test_process_while() {
-    let n = Rc::new(RefCell::new(0));
+    let n = Arc::new(Mutex::new(0));
     let nn = n.clone();
 
     let iter = move |_| {
-        let mut x = nn.borrow_mut();
+        let mut x = nn.lock().unwrap();
         *x = *x + 1;
         if *x == 42 {
             return LoopStatus::Exit(());
@@ -105,9 +105,9 @@ fn test_process_while() {
         iter
     ).while_loop();
 
-    assert_eq!(*n.borrow(), 0);
+    assert_eq!(*n.lock().unwrap(), 0);
     execute_process(p);
-    assert_eq!(*n.borrow(), 42);
+    assert_eq!(*n.lock().unwrap(), 42);
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn test_process_if() {
 
 #[test]
 fn test_signal_await() {
-    let n = Rc::new(RefCell::new(0));
+    let n = Arc::new(Mutex::new(0));
     let nn = n.clone();
     let nnn = n.clone();
     let nnnn = n.clone();
@@ -129,23 +129,23 @@ fn test_signal_await() {
 
     let p = join(
         s.await_immediate().map(move |()| {
-            *nnn.borrow_mut() = 1337;
+            *nnn.lock().unwrap() = 1337;
         }),
         value(()).map(move |()| {
-            *nn.borrow_mut() = 42;
+            *nn.lock().unwrap() = 42;
         }).pause().then(s.emit()).then(value(()).pause()).map(move |()| {
-            *nnnn.borrow_mut() += 1;
+            *nnnn.lock().unwrap() += 1;
         })
     );
 
-    assert_eq!(*n.borrow(), 0);
+    assert_eq!(*n.lock().unwrap(), 0);
     execute_process(p);
-    assert_eq!(*n.borrow(), 1338);
+    assert_eq!(*n.lock().unwrap(), 1338);
 }
 
 #[test]
 fn test_signal_await_2() {
-    let n = Rc::new(RefCell::new(0));
+    let n = Arc::new(Mutex::new(0));
     let nn = n.clone();
     let nnn = n.clone();
     let nnnn = n.clone();
@@ -155,30 +155,30 @@ fn test_signal_await_2() {
 
     let p = join(
         s.await_immediate().map(move |()| {
-            *nnn.borrow_mut() = 1337;
+            *nnn.lock().unwrap() = 1337;
         }),
         value(()).map(move |()| {
-            *nn.borrow_mut() = 42;
+            *nn.lock().unwrap() = 42;
         }).pause().then(s.emit()).then(value(()).pause()).map(move |()| {
-            *nnnn.borrow_mut() += 1;
+            *nnnn.lock().unwrap() += 1;
         })
     );
 
-    assert_eq!(*n.borrow(), 0);
+    assert_eq!(*n.lock().unwrap(), 0);
     execute_process(p);
-    assert_eq!(*n.borrow(), 43);
+    assert_eq!(*n.lock().unwrap(), 43);
 }
 
 #[test]
 fn test_signal_present() {
     let s = PureSignal::new();
 
-    let n = Rc::new(RefCell::new(0));
-    let m = Rc::new(RefCell::new(0));
+    let n = Arc::new(Mutex::new(0));
+    let m = Arc::new(Mutex::new(0));
     let mm = m.clone();
 
     let iter = move |_| {
-        let mut x = n.borrow_mut();
+        let mut x = n.lock().unwrap();
         *x = *x + 1;
         if *x == 42 {
             return LoopStatus::Exit(());
@@ -188,7 +188,7 @@ fn test_signal_present() {
     };
 
     let iter2 = move |_| {
-        let mut x = mm.borrow_mut();
+        let mut x = mm.lock().unwrap();
         *x = *x + 2;
         LoopStatus::Continue
     };
@@ -199,9 +199,9 @@ fn test_signal_present() {
 
     let q = if_else(s.present(), value(()).map(iter2), value(LoopStatus::Exit(()))).pause().while_loop();
 
-    assert_eq!(*m.borrow(), 0);
+    assert_eq!(*m.lock().unwrap(), 0);
     execute_process(join(p, q));
-    assert_eq!(*m.borrow(), 42 * 2);
+    assert_eq!(*m.lock().unwrap(), 42 * 2);
 }
 
 #[test]
@@ -251,4 +251,19 @@ fn test_unique_producer_signal() {
         UniqueProducerSignalProducer::new(0);
 
     assert_eq!(execute_process(join(s_prod.emit(value(1)), join(s_cons.await_immediate(), s_cons.await_immediate()))), ((), (1, 1)));
+}
+
+#[test]
+fn test_parallel_continuation() {
+    let n = Arc::new(Mutex::new(0));
+    let nn = n.clone();
+    let mut runtime = ParallelRuntime::new();
+    let cont_print = Box::new(move |_run :&mut Runtime, ()| *nn.lock().unwrap() = 42);
+    let cont_wait = Box::new(cont_print.pause());
+    runtime.on_current_instant(cont_wait);
+    assert_eq!(*n.lock().unwrap(), 0);
+    assert!(runtime.instant());
+    assert_eq!(*n.lock().unwrap(), 0);
+    assert!(!runtime.instant());
+    assert_eq!(*n.lock().unwrap(), 42);
 }

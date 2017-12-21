@@ -7,17 +7,17 @@ use super::*;
 //  \___/|_|   |____/|_|\__, |_| |_|\__,_|_|
 //                      |___/
 
-pub struct UPSignalRuntimeRef<V> where V: Clone + Sized + 'static {
+pub struct UPSignalRuntimeRef<V> where V: Clone + Send + Sync + Sized + 'static {
     signal_runtime: Arc<Mutex<UPSignalRuntime<V>>>,
 }
 
-impl<V> Clone for UPSignalRuntimeRef<V> where V: Clone + Sized + 'static {
+impl<V> Clone for UPSignalRuntimeRef<V> where V: Clone + Send + Sync + Sized + 'static {
     fn clone(&self) -> Self {
         UPSignalRuntimeRef {signal_runtime: self.signal_runtime.clone()}
     }
 }
 
-struct UPSignalRuntime<V> where V: Clone + Sized + 'static {
+struct UPSignalRuntime<V> where V: Clone + Send + Sync + Sized + 'static {
     callbacks: Vec<Box<Continuation<V>>>,
     waiting_present: Vec<Box<Continuation<bool>>>,
     status: bool,
@@ -25,13 +25,13 @@ struct UPSignalRuntime<V> where V: Clone + Sized + 'static {
     current_value: V,
 }
 
-impl<V> UPSignalRuntime<V> where V: Clone + Sized + 'static {
+impl<V> UPSignalRuntime<V> where V: Clone + Send + Sync + Sized + 'static {
     fn add_callback<C>(&mut self, c: C) where C: Continuation<V> {
         self.callbacks.push(Box::new(c));
     }
 }
 
-impl<V> UPSignalRuntimeRef<V> where V: Clone + Sized + 'static {
+impl<V> UPSignalRuntimeRef<V> where V: Clone + Send + Sync + Sized + 'static {
     fn emit(self, runtime: &mut Runtime, value: V) {
         {
             let sig_run = self.signal_runtime.clone();
@@ -88,7 +88,7 @@ impl<V> UPSignalRuntimeRef<V> where V: Clone + Sized + 'static {
     }
 }
 
-pub trait UPSignal<V>: 'static where V: Clone + Sized + 'static {
+pub trait UPSignal<V>: 'static where V: Clone + Send + Sync + Sized + 'static {
     fn runtime(&self) -> UPSignalRuntimeRef<V>;
 
     fn emit<P>(self, value: P) -> UPEmit<V, P> where Self: Sized, P: Process<Value = V> {
@@ -96,7 +96,7 @@ pub trait UPSignal<V>: 'static where V: Clone + Sized + 'static {
     }
 }
 
-pub trait UPSignalConsumer<V>: 'static where V: Clone + Sized + 'static {
+pub trait UPSignalConsumer<V>: 'static where V: Clone + Send + Sync + Sized + 'static {
     fn runtime(&self) -> UPSignalRuntimeRef<V>;
 
     fn await_immediate(&self) -> UPAwaitImmediate<V> where Self: Sized {
@@ -108,11 +108,11 @@ pub trait UPSignalConsumer<V>: 'static where V: Clone + Sized + 'static {
     }
 }
 
-pub struct UniqueProducerSignalProducer<V> where V: Clone + Sized + 'static {
+pub struct UniqueProducerSignalProducer<V> where V: Clone + Send + Sync + Sized + 'static {
     runtime: UPSignalRuntimeRef<V>
 }
 
-impl<V> UniqueProducerSignalProducer<V> where V: Clone + Sized + 'static {
+impl<V> UniqueProducerSignalProducer<V> where V: Clone + Send + Sync + Sized + 'static {
     pub fn new(default_value: V) -> (UniqueProducerSignalProducer<V>, UniqueProducerSignalConsumer<V>) {
         let runtime = UPSignalRuntime {
             status: false,
@@ -133,34 +133,34 @@ impl<V> UniqueProducerSignalProducer<V> where V: Clone + Sized + 'static {
     }
 }
 
-impl<V> UPSignal<V> for UniqueProducerSignalProducer<V> where V: Clone + Sized + 'static {
+impl<V> UPSignal<V> for UniqueProducerSignalProducer<V> where V: Clone + Send + Sync + Sized + 'static {
     fn runtime(&self) -> UPSignalRuntimeRef<V> {
         self.runtime.clone()
     }
 }
 
-pub struct UniqueProducerSignalConsumer<V> where V: Clone + Sized + 'static {
+pub struct UniqueProducerSignalConsumer<V> where V: Clone + Send + Sync + Sized + 'static {
     runtime: UPSignalRuntimeRef<V>
 }
 
-impl<V> UPSignalConsumer<V> for UniqueProducerSignalConsumer<V> where V: Clone + Sized + 'static {
+impl<V> UPSignalConsumer<V> for UniqueProducerSignalConsumer<V> where V: Clone + Send + Sync + Sized + 'static {
     fn runtime(&self) -> UPSignalRuntimeRef<V> {
         self.runtime.clone()
     }
 }
 
 
-impl<V> Clone for UniqueProducerSignalConsumer<V> where V: Clone + Sized + 'static {
+impl<V> Clone for UniqueProducerSignalConsumer<V> where V: Clone + Send + Sync + Sized + 'static {
     fn clone(&self) -> Self {
         UniqueProducerSignalConsumer {runtime: self.runtime.clone()}
     }
 }
 
-pub struct UPAwaitImmediate<V> where V: Clone + Sized + 'static  {
+pub struct UPAwaitImmediate<V> where V: Clone + Send + Sync + Sized + 'static  {
     signal: UPSignalRuntimeRef<V>
 }
 
-impl<V> Process for UPAwaitImmediate<V> where V: Clone + Sized + 'static {
+impl<V> Process for UPAwaitImmediate<V> where V: Clone + Send + Sync + Sized + 'static {
     type Value = V;
 
     fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<V> {
@@ -168,7 +168,7 @@ impl<V> Process for UPAwaitImmediate<V> where V: Clone + Sized + 'static {
     }
 }
 
-impl<V> ProcessMut for UPAwaitImmediate<V> where V: Clone + Sized + 'static {
+impl<V> ProcessMut for UPAwaitImmediate<V> where V: Clone + Send + Sync + Sized + 'static {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, V)> {
         let sig = self.signal.clone();
         self.signal.on_signal(runtime, |runtime: &mut Runtime, v| {
@@ -177,12 +177,12 @@ impl<V> ProcessMut for UPAwaitImmediate<V> where V: Clone + Sized + 'static {
     }
 }
 
-pub struct UPEmit<V, P> where V: Clone + Sized + 'static, P: Process<Value = V> {
+pub struct UPEmit<V, P> where V: Clone + Send + Sync + Sized + 'static, P: Process<Value = V> {
     signal: UPSignalRuntimeRef<V>,
     value: P,
 }
 
-impl<V, P> Process for UPEmit<V, P> where V: Clone + Sized + 'static, P: Process<Value = V> {
+impl<V, P> Process for UPEmit<V, P> where V: Clone + Send + Sync + Sized + 'static, P: Process<Value = V> {
     type Value = ();
 
     fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
@@ -195,7 +195,7 @@ impl<V, P> Process for UPEmit<V, P> where V: Clone + Sized + 'static, P: Process
     }
 }
 
-impl<V, P> ProcessMut for UPEmit<V, P> where V: Clone + Sized + 'static, P: ProcessMut<Value = V> {
+impl<V, P> ProcessMut for UPEmit<V, P> where V: Clone + Send + Sync + Sized + 'static, P: ProcessMut<Value = V> {
     fn call_mut<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<(Self, ())> {
         let sig = self.signal.clone();
 
@@ -206,11 +206,11 @@ impl<V, P> ProcessMut for UPEmit<V, P> where V: Clone + Sized + 'static, P: Proc
     }
 }
 
-pub struct UPPresent<V> where V: Clone + Sized + 'static {
+pub struct UPPresent<V> where V: Clone + Send + Sync + Sized + 'static {
     signal: UPSignalRuntimeRef<V>
 }
 
-impl<V> Process for UPPresent<V> where V: Clone + Sized + 'static {
+impl<V> Process for UPPresent<V> where V: Clone + Send + Sync + Sized + 'static {
     type Value = bool;
 
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<bool> {
@@ -218,7 +218,7 @@ impl<V> Process for UPPresent<V> where V: Clone + Sized + 'static {
     }
 }
 
-impl<V> ProcessMut for UPPresent<V> where V: Clone + Sized + 'static {
+impl<V> ProcessMut for UPPresent<V> where V: Clone + Send + Sync + Sized + 'static {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, bool)> {
         let sig = self.signal.clone();
         self.signal.test_present(runtime, move |runtime: &mut Runtime, status: bool| {

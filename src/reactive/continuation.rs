@@ -9,7 +9,7 @@ use super::*;
 
 /// A reactive continuation awaiting a value of type `V`. For the sake of simplicity,
 /// continuation must be valid on the static lifetime.
-pub trait Continuation<V>: 'static {
+pub trait Continuation<V>: 'static + Sync + Send where V: Sync + Send {
     /// Calls the continuation.
     fn call(self, runtime: &mut Runtime, value: V);
 
@@ -31,7 +31,7 @@ pub trait Continuation<V>: 'static {
     }
 }
 
-impl<V, F> Continuation<V> for F where F: FnOnce(&mut Runtime, V) + 'static {
+impl<V, F> Continuation<V> for F where F: FnOnce(&mut Runtime, V) + Sync + Send + 'static, V: Sync + Send {
     fn call(self, runtime: &mut Runtime, value: V)  {
         self(runtime, value);
     }
@@ -45,7 +45,7 @@ impl<V, F> Continuation<V> for F where F: FnOnce(&mut Runtime, V) + 'static {
 pub struct Map<C, F> { continuation: C, map: F }
 
 impl<C, F, V1, V2> Continuation<V1> for Map<C, F>
-    where C: Continuation<V2>, F: FnOnce(V1) -> V2 + 'static
+    where C: Continuation<V2>, F: FnOnce(V1) -> V2 + Sync + Send + 'static, V1: Sync + Send, V2: Sync + Send
 {
     fn call(self, runtime: &mut Runtime, value: V1) {
         self.continuation.call(runtime, (self.map)(value));
@@ -59,7 +59,7 @@ impl<C, F, V1, V2> Continuation<V1> for Map<C, F>
 pub struct Pause<C> { continuation: C }
 
 impl<C, V> Continuation<V> for Pause<C>
-    where C: Continuation<V> + 'static, V: 'static {
+    where C: Continuation<V> + 'static, V: 'static, V: Sync + Send {
     fn call(self, runtime: &mut Runtime, value: V) {
         let c = self.continuation;
         runtime.on_next_instant(Box::new(|run: &mut Runtime, _| c.call(run, value)));

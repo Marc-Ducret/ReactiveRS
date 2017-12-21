@@ -15,6 +15,7 @@ mod tests;
 use self::continuation::*;
 use self::runtime::*;
 use self::runtime::sequential_runtime::*;
+use self::runtime::parallel_runtime::*;
 use self::process::*;
 use self::signal::*;
 use self::signal::pure_signal::*;

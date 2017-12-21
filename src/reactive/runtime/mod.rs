@@ -1,6 +1,7 @@
 use super::*;
 
 pub mod sequential_runtime;
+pub mod parallel_runtime;
 
 //  ____              _   _
 // |  _ \ _   _ _ __ | |_(_)_ __ ___   ___
@@ -8,7 +9,7 @@ pub mod sequential_runtime;
 // |  _ <| |_| | | | | |_| | | | | | |  __/
 // |_| \_\\__,_|_| |_|\__|_|_| |_| |_|\___|
 
-pub trait Runtime {
+pub trait Runtime: Send {
     fn execute(&mut self);
 
     fn instant(&mut self) -> bool;
