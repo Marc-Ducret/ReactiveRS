@@ -16,7 +16,7 @@ use super::*;
 fn question2() {
     let n = Rc::new(RefCell::new(0));
     let nn = n.clone();
-    let mut runtime = Runtime::new();
+    let mut runtime = SequentialRuntime::new();
     let cont_print = Box::new(move |_run :&mut Runtime, ()| *nn.borrow_mut() = 42);
     let cont_wait = Box::new(|run :&mut Runtime, ()| run.on_next_instant(cont_print));
     runtime.on_current_instant(cont_wait);
@@ -31,7 +31,7 @@ fn question2() {
 fn question5() {
     let n = Rc::new(RefCell::new(0));
     let nn = n.clone();
-    let mut runtime = Runtime::new();
+    let mut runtime = SequentialRuntime::new();
     let cont_print = Box::new(move |_run :&mut Runtime, ()| *nn.borrow_mut() = 42);
     let cont_wait = Box::new(cont_print.pause());
     runtime.on_current_instant(cont_wait);
@@ -46,7 +46,7 @@ fn question5() {
 fn test_flatten() {
     let n = Rc::new(RefCell::new(0));
     let nn = n.clone();
-    let mut runtime = Runtime::new();
+    let mut runtime = SequentialRuntime::new();
     let p = value(value(42));
 
     assert_eq!(*n.borrow(), 0);

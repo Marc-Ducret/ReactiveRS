@@ -87,7 +87,7 @@ pub trait ProcessMut: Process {
 pub enum LoopStatus<V> { Continue, Exit(V) }
 
 pub fn execute_process<P>(p: P) -> P::Value where P: Process {
-    let mut runtime = Runtime::new();
+    let mut runtime = SequentialRuntime::new();
     let result = Rc::new(Cell::new(None));
     let result_ref = result.clone();
     runtime.on_current_instant(Box::new(|run: &mut Runtime, _|
