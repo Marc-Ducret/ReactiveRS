@@ -51,6 +51,8 @@ pub fn redstone_sim() {
         blocks[x] = Type::REDSTONE(true, true, true);
     }
     blocks[5] = Type::INVERTER(Direction::EAST);
+    blocks[19] = Type::INVERTER(Direction::EAST);
+    blocks[30] = Type::INVERTER(Direction::EAST);
 
     let mut power_signal = Vec::new();
     for _ in 0..(w*h) {
@@ -117,7 +119,7 @@ pub fn redstone_sim() {
             let powers = powers_ref.lock().unwrap();
             for y in 0..h {
                 for x in 0..w {
-                    print!("{}", (*powers)[x + y * w]);
+                    print!("{:X}", (*powers)[x + y * w]);
                 }
                 println!();
             }
