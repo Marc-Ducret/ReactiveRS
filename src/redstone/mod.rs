@@ -25,7 +25,7 @@ fn displace((x, y): (usize, usize), dir: Direction) -> (usize, usize){
     match dir {
         Direction::SOUTH => return (x  , y-1),
         Direction::NORTH => return (x  , y+1),
-        Direction::EAST  => return (x  , y  ),
+        Direction::EAST  => return (x+1, y  ),
         Direction::WEST  => return (x-1, y  ),
     }
 }
@@ -50,7 +50,7 @@ pub fn redstone_sim() {
     for x in 0..w {
         blocks[x] = Type::REDSTONE(true, true, true);
     }
-    blocks[0] = Type::INVERTER(Direction::EAST);
+    blocks[5] = Type::INVERTER(Direction::EAST);
 
     let mut power_signal = Vec::new();
     for _ in 0..(w*h) {
@@ -109,7 +109,7 @@ pub fn redstone_sim() {
                 (*powers)[i] = 0;
             }
             for (x, y, power) in entries {
-                (*powers)[x + y * w] = power;
+                (*powers)[x + y * w] = power+1;
             }
         };
         let powers_ref = powers.clone();
@@ -117,7 +117,7 @@ pub fn redstone_sim() {
             let powers = powers_ref.lock().unwrap();
             for y in 0..h {
                 for x in 0..w {
-                    print!("{}", (*powers)[x + y * w]+1);
+                    print!("{}", (*powers)[x + y * w]);
                 }
                 println!();
             }
