@@ -43,6 +43,15 @@ pub fn redstone_sim() {
     let h = 32;
     let w = 32;
 
+    let mut blocks = Vec::new();
+    for _ in 0..(w*h) {
+        blocks.push(Type::VOID);
+    }
+    for x in 0..w {
+        blocks[x] = Type::REDSTONE(true, true, true);
+    }
+    blocks[0] = Type::INVERTER(Direction::EAST);
+
     let mut power_signal = Vec::new();
     for _ in 0..(w*h) {
         power_signal.push(ValueSignal::new(0, Box::new(|x: i32, y: i32| max(x, y))));
@@ -78,7 +87,7 @@ pub fn redstone_sim() {
         };
         let mut emit_near = Vec::new();
         for d in vec!(Direction::NORTH, Direction::SOUTH, Direction::EAST, Direction::WEST) {
-            if d != dir {
+            if d != invert_dir(dir) {
                 emit_near.push(power_at(displace((x, y), d)).emit(value(0xF)))
             }
         }
@@ -108,7 +117,7 @@ pub fn redstone_sim() {
             let powers = powers_ref.lock().unwrap();
             for y in 0..h {
                 for x in 0..w {
-                    print!("{}", (*powers)[x + y * w]);
+                    print!("{}", (*powers)[x + y * w]+1);
                 }
                 println!();
             }
@@ -117,11 +126,17 @@ pub fn redstone_sim() {
         display_signal.await().map(read_entries).map(draw).then(value(continue_loop)).while_loop()
     };
 
-    let mut processes = Vec::new();
+    let mut p_redstone = Vec::new();
+    let mut p_inverter = Vec::new();
     for x in 0..w {
         for y in 0..h {
-            processes.push(redstone_wire_process(x, y));
+            match blocks[x + y * w] {
+                Type::VOID => (),
+                Type::BLOCK => (),
+                Type::REDSTONE(r, g, b) => p_redstone.push(redstone_wire_process(x, y)),
+                Type::INVERTER(dir) => p_inverter.push(redstone_torch_process(x, y, dir)),
+            }
         }
     }
-    execute_process_par(multi_join(processes).join(power_signal[0].clone().emit(value(9))).join(display_process()));
+    execute_process_par(multi_join(p_redstone).join(multi_join(p_inverter)).join(display_process()));
 }
