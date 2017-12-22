@@ -116,7 +116,7 @@ pub fn execute_process_par<P>(p: P) -> P::Value where P: Process {
             *res = Some(val);
         })
     ));
-    runtime.execute();
+    runtime.start().execute();
     let mut res = None;
     std::mem::swap(&mut res, &mut *result.lock().unwrap());
     if let Some(res) = res {

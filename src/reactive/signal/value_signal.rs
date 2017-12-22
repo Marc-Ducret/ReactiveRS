@@ -7,17 +7,17 @@ use super::*;
 //    \_/ \__,_|_|\__,_|\___|____/|_|\__, |_| |_|\__,_|_|
 //                                   |___/
 
-pub struct VSignalRuntimeRef<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+pub struct VSignalRuntimeRef<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     signal_runtime: Arc<Mutex<VSignalRuntime<V, G>>>,
 }
 
-impl<V, G> Clone for VSignalRuntimeRef<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+impl<V, G> Clone for VSignalRuntimeRef<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     fn clone(&self) -> Self {
         VSignalRuntimeRef{signal_runtime: self.signal_runtime.clone()}
     }
 }
 
-struct VSignalRuntime<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+struct VSignalRuntime<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     callbacks: Vec<Box<Continuation<()>>>,
     waiting_present: Vec<Box<Continuation<bool>>>,
     waiting_await: Vec<Box<Continuation<V>>>,
@@ -27,13 +27,13 @@ struct VSignalRuntime<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sy
     current_value: V,
 }
 
-impl<V, G> VSignalRuntime<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+impl<V, G> VSignalRuntime<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     fn add_callback<C>(&mut self, c: C) where C: Continuation<()> {
         self.callbacks.push(Box::new(c));
     }
 }
 
-impl<V, G> VSignalRuntimeRef<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+impl<V, G> VSignalRuntimeRef<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     fn emit(self, runtime: &mut Runtime, value: G) {
         {
             let sig_run = self.signal_runtime.clone();
@@ -100,7 +100,7 @@ impl<V, G> VSignalRuntimeRef<V, G> where V: Clone + Send + Sync + 'static, G: Se
     }
 }
 
-pub trait VSignal<V, G>: 'static where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+pub trait VSignal<V, G>: 'static where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     fn runtime(&self) -> VSignalRuntimeRef<V, G>;
 
     fn await_immediate(&self) -> VAwaitImmediate<V, G> where Self: Sized {
@@ -120,11 +120,11 @@ pub trait VSignal<V, G>: 'static where V: Clone + Send + Sync + 'static, G: Send
     }
 }
 
-pub struct ValueSignal<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+pub struct ValueSignal<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     runtime: VSignalRuntimeRef<V, G>
 }
 
-impl<V, G> ValueSignal<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+impl<V, G> ValueSignal<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     pub fn new(default_value: V, gather: Box<Fn(V, G) -> V + Send + Sync>) -> ValueSignal<V, G> {
         let runtime = VSignalRuntime {
             status: false,
@@ -141,23 +141,23 @@ impl<V, G> ValueSignal<V, G> where V: Clone + Send + Sync + 'static, G: Send + S
     }
 }
 
-impl<V, G> Clone for ValueSignal<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+impl<V, G> Clone for ValueSignal<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     fn clone(&self) -> Self {
         ValueSignal {runtime: self.runtime.clone()}
     }
 }
 
-impl<V, G> VSignal<V, G> for ValueSignal<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+impl<V, G> VSignal<V, G> for ValueSignal<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     fn runtime(&self) -> VSignalRuntimeRef<V, G> {
         self.runtime.clone()
     }
 }
 
-pub struct VAwaitImmediate<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static  {
+pub struct VAwaitImmediate<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static  {
     signal: VSignalRuntimeRef<V, G>
 }
 
-impl<V, G> Process for VAwaitImmediate<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+impl<V, G> Process for VAwaitImmediate<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     type Value = ();
 
     fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
@@ -165,7 +165,7 @@ impl<V, G> Process for VAwaitImmediate<V, G> where V: Clone + Send + Sync + 'sta
     }
 }
 
-impl<V, G> ProcessMut for VAwaitImmediate<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+impl<V, G> ProcessMut for VAwaitImmediate<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, ())> {
         let sig = self.signal.clone();
         self.signal.on_signal(runtime, |runtime: &mut Runtime, ()| {
@@ -174,11 +174,11 @@ impl<V, G> ProcessMut for VAwaitImmediate<V, G> where V: Clone + Send + Sync + '
     }
 }
 
-pub struct VAwait<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static  {
+pub struct VAwait<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static  {
     signal: VSignalRuntimeRef<V, G>
 }
 
-impl<V, G> Process for VAwait<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+impl<V, G> Process for VAwait<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     type Value = V;
 
     fn call<C>(self, _: &mut Runtime, c: C) where C: Continuation<V> {
@@ -186,7 +186,7 @@ impl<V, G> Process for VAwait<V, G> where V: Clone + Send + Sync + 'static, G: S
     }
 }
 
-impl<V, G> ProcessMut for VAwait<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+impl<V, G> ProcessMut for VAwait<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     fn call_mut<C>(self, _: &mut Runtime, next: C) where C: Continuation<(Self, V)> {
         let sig = self.signal.clone();
         self.signal.await(|runtime: &mut Runtime, v| {
@@ -195,40 +195,40 @@ impl<V, G> ProcessMut for VAwait<V, G> where V: Clone + Send + Sync + 'static, G
     }
 }
 
-pub struct VEmit<V, G, P> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static, P: Process<Value = G> {
+pub struct VEmit<V, G, P> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static, P: Process<Value = G> {
     signal: VSignalRuntimeRef<V, G>,
     value: P,
 }
 
-impl<V, G, P> Process for VEmit<V, G, P> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static, P: Process<Value = G> {
-    type Value = ();
+impl<V, G, P> Process for VEmit<V, G, P> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static, P: Process<Value = G> {
+    type Value = G;
 
-    fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
+    fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<G> {
         let sig = self.signal.clone();
 
-        self.value.call(runtime, move|runtime: &mut Runtime, v| {
-            sig.emit(runtime, v);
-            c.call(runtime, ());
+        self.value.call(runtime, move|runtime: &mut Runtime, v: G| {
+            sig.emit(runtime, v.clone());
+            c.call(runtime, v);
         });
     }
 }
 
-impl<V, G, P> ProcessMut for VEmit<V, G, P> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static, P: ProcessMut<Value = G> {
-    fn call_mut<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<(Self, ())> {
+impl<V, G, P> ProcessMut for VEmit<V, G, P> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static, P: ProcessMut<Value = G> {
+    fn call_mut<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<(Self, G)> {
         let sig = self.signal.clone();
 
-        self.value.call_mut(runtime, move|runtime: &mut Runtime, (process, v)| {
-            sig.clone().emit(runtime, v);
-            c.call(runtime, (VEmit {signal: sig, value: process}, ()));
+        self.value.call_mut(runtime, move|runtime: &mut Runtime, (process, v): (P, G)| {
+            sig.clone().emit(runtime, v.clone());
+            c.call(runtime, (VEmit {signal: sig, value: process}, v));
         });
     }
 }
 
-pub struct VPresent<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+pub struct VPresent<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     signal: VSignalRuntimeRef<V, G>
 }
 
-impl<V, G> Process for VPresent<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+impl<V, G> Process for VPresent<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     type Value = bool;
 
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<bool> {
@@ -236,7 +236,7 @@ impl<V, G> Process for VPresent<V, G> where V: Clone + Send + Sync + 'static, G:
     }
 }
 
-impl<V, G> ProcessMut for VPresent<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
+impl<V, G> ProcessMut for VPresent<V, G> where V: Clone + Send + Sync + 'static, G: Clone + Send + Sync + 'static {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, bool)> {
         let sig = self.signal.clone();
         self.signal.test_present(runtime, move|runtime: &mut Runtime, status: bool| {

@@ -11,6 +11,7 @@ pub mod runtime;
 pub mod process;
 pub mod signal;
 mod tests;
+mod bench;
 
 use self::continuation::*;
 use self::runtime::*;

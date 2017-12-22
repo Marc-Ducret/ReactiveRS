@@ -71,13 +71,13 @@ impl ParallelRuntime {
 }
 
 impl ParallelRuntime {
-    pub fn execute(self) {
+    pub fn start(self) -> Arc<Self> {
         let mut workers = Vec::with_capacity(self.worker_count);
         let runtime = Arc::new(self);
         for _ in 0..runtime.worker_count {
             let runtime = runtime.clone();
-            let worker = move|| {
-                let mut local_runtime = LocalParallelRuntime {runtime: runtime.clone()};
+            let worker = move || {
+                let mut local_runtime = LocalParallelRuntime { runtime: runtime.clone() };
                 loop {
                     let c = runtime.todo.pop();
                     c.call_box(&mut local_runtime, ());
@@ -86,7 +86,11 @@ impl ParallelRuntime {
             };
             workers.push(thread::spawn(worker));
         }
-        while runtime.instant() {}
+        return runtime
+    }
+
+    pub fn execute(&self) {
+        while self.instant() {}
     }
 
     fn instant(&self) -> bool {

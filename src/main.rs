@@ -1,8 +1,14 @@
+#![feature(conservative_impl_trait)]
+
 extern crate reactive_rs;
+
+mod redstone;
 
 use reactive_rs::reactive::process::*;
 use reactive_rs::reactive::signal::pure_signal::*;
 use reactive_rs::reactive::signal::value_signal::*;
+
+use redstone::*;
 
 use std::{thread, time};
 
@@ -28,13 +34,14 @@ fn _main() {
     execute_process(join(p, join(q, r)));
 }
 
-fn main() {
+fn __main() {
     let s = ValueSignal::new(0, Box::new(|x, y| x+y));
 
     let conti: LoopStatus<()> = LoopStatus::Continue;
     let mut ps = Vec::new();
-    for _ in 0..100000 {
-        ps.push(s.emit(value(1)).then(value(conti).pause()).while_loop());
+    for _ in 0..1000 {
+        let sleep = |_| thread::sleep(time::Duration::from_millis(1));
+        ps.push(s.emit(value(1)).map(sleep).then(value(conti).pause()).while_loop());
     }
     let p = multi_join(ps);
     let print = |x| {
@@ -43,4 +50,8 @@ fn main() {
     };
     let q = s.emit(s.await().map(print)).then(value(conti)).while_loop();
     execute_process(join(p, q));
+}
+
+fn main() {
+    redstone_sim();
 }

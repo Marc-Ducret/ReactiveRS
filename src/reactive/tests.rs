@@ -209,11 +209,11 @@ fn test_value_signal() {
     timeout_ms(|| {
         let s: ValueSignal<i32, i32> = ValueSignal::new(0, Box::new(|x, y| x + y));
 
-        assert_eq!(execute_process(join(s.emit(value(1)).then(s.emit(value(5))), s.await())), ((), 6));
-        assert_eq!(execute_process(join(s.emit(value(1)).then(s.emit(value(5)).pause()), s.await())), ((), 1));
+        assert_eq!(execute_process(join(s.emit(value(1)).then(s.emit(value(5))).then(value(())), s.await())), ((), 6));
+        assert_eq!(execute_process(join(s.emit(value(1)).then(s.emit(value(5)).pause()).then(value(())), s.await())), ((), 1));
         for _ in 0..100 {
             assert_eq!(execute_process(join(
-                s.emit(value(2)).then(s.emit(value(5)).pause()).then(s.emit(value(15)).pause()),
+                s.emit(value(2)).then(s.emit(value(5)).pause()).then(s.emit(value(15)).pause()).then(value(())),
                 join(
                     s.await(),
                     s.await().then(s.await())
@@ -267,11 +267,11 @@ fn test_parallel_signal() {
     timeout_ms(|| {
         let s: ValueSignal<i32, i32> = ValueSignal::new(0, Box::new(|x, y| x + y));
 
-        assert_eq!(execute_process_par(join(s.emit(value(1)).then(s.emit(value(5))), s.await())), ((), 6));
-        assert_eq!(execute_process_par(join(s.emit(value(1)).then(s.emit(value(5)).pause()), s.await())), ((), 1));
+        assert_eq!(execute_process_par(join(s.emit(value(1)).then(s.emit(value(5))).then(value(())), s.await())), ((), 6));
+        assert_eq!(execute_process_par(join(s.emit(value(1)).then(s.emit(value(5)).pause()).then(value(())), s.await())), ((), 1));
         for _ in 0..100 {
             assert_eq!(execute_process_par(join(
-                s.emit(value(2)).then(s.emit(value(5)).pause()).then(s.emit(value(15)).pause()),
+                s.emit(value(2)).then(s.emit(value(5)).pause()).then(s.emit(value(15)).pause()).then(value(())),
                 join(
                     s.await(),
                     s.await().then(s.await())
