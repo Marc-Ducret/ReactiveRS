@@ -40,7 +40,7 @@ impl<V> UPSignalRuntimeRef<V> where V: Clone + Send + Sync + Sized + 'static {
             sig.status = true;
             while let Some(c) = sig.callbacks.pop() {
                 let value = sig.current_value.clone();
-                runtime.on_current_instant(Box::new(move |runtime: &mut Runtime, ()| c.call_box(runtime, value)));
+                runtime.on_current_instant(Box::new(move|runtime: &mut Runtime, ()| c.call_box(runtime, value)));
             }
             while let Some(c) = sig.waiting_present.pop() {
                 runtime.on_current_instant(Box::new(|runtime: &mut Runtime, ()| c.call_box(runtime, true)));
@@ -49,7 +49,7 @@ impl<V> UPSignalRuntimeRef<V> where V: Clone + Send + Sync + Sized + 'static {
 
         {
             let sig_run = self.signal_runtime.clone();
-            runtime.on_end_of_instant(Box::new(move |_: &mut Runtime, ()| {
+            runtime.on_end_of_instant(Box::new(move|_: &mut Runtime, ()| {
                 let mut sig = sig_run.lock().unwrap();
                 sig.current_value = sig.default_value.clone();
                 sig.status = false;
@@ -62,7 +62,7 @@ impl<V> UPSignalRuntimeRef<V> where V: Clone + Send + Sync + Sized + 'static {
         let mut sig = sig_run.lock().unwrap();
         if sig.status {
             let value = sig.current_value.clone();
-            runtime.on_current_instant(Box::new(move |runtime: &mut Runtime, ()| c.call(runtime, value)));
+            runtime.on_current_instant(Box::new(move|runtime: &mut Runtime, ()| c.call(runtime, value)));
         } else {
             sig.add_callback(c);
         }
@@ -76,7 +76,7 @@ impl<V> UPSignalRuntimeRef<V> where V: Clone + Send + Sync + Sized + 'static {
         } else {
             if sig.waiting_present.is_empty() {
                 let sig_run = self.signal_runtime.clone();
-                runtime.on_end_of_instant(Box::new(move |runtime: &mut Runtime, ()| {
+                runtime.on_end_of_instant(Box::new(move|runtime: &mut Runtime, ()| {
                     let mut sig = sig_run.lock().unwrap();
                     while let Some(c) = sig.waiting_present.pop() {
                         c.call_box(runtime, false)
@@ -188,7 +188,7 @@ impl<V, P> Process for UPEmit<V, P> where V: Clone + Send + Sync + Sized + 'stat
     fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
         let sig = self.signal.clone();
 
-        self.value.call(runtime, move |runtime: &mut Runtime, v| {
+        self.value.call(runtime, move|runtime: &mut Runtime, v| {
             sig.emit(runtime, v);
             c.call(runtime, ());
         });
@@ -199,7 +199,7 @@ impl<V, P> ProcessMut for UPEmit<V, P> where V: Clone + Send + Sync + Sized + 's
     fn call_mut<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<(Self, ())> {
         let sig = self.signal.clone();
 
-        self.value.call_mut(runtime, move |runtime: &mut Runtime, (process, v)| {
+        self.value.call_mut(runtime, move|runtime: &mut Runtime, (process, v)| {
             sig.clone().emit(runtime, v);
             c.call(runtime, (UPEmit {signal: sig, value: process}, ()));
         });
@@ -221,7 +221,7 @@ impl<V> Process for UPPresent<V> where V: Clone + Send + Sync + Sized + 'static 
 impl<V> ProcessMut for UPPresent<V> where V: Clone + Send + Sync + Sized + 'static {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, bool)> {
         let sig = self.signal.clone();
-        self.signal.test_present(runtime, move |runtime: &mut Runtime, status: bool| {
+        self.signal.test_present(runtime, move|runtime: &mut Runtime, status: bool| {
             next.call(runtime, (UPPresent {signal: sig}, status))
         });
     }

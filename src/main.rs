@@ -11,7 +11,7 @@ fn _main() {
 
     let continu: LoopStatus<()> = LoopStatus::Continue;
     let dt = time::Duration::from_millis(100);
-    let print_emit = move |_| {
+    let print_emit = move|_| {
         println!("emit");
         thread::sleep(dt);
     };

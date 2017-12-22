@@ -52,14 +52,14 @@ impl<V, G> UCSignalRuntimeRef<V, G> where V: Sized + Send + Sync + 'static, G: '
 
         {
             let sig_run = self.signal_runtime.clone();
-            runtime.on_end_of_instant(Box::new(move |runtime: &mut Runtime, ()| {
+            runtime.on_end_of_instant(Box::new(move|runtime: &mut Runtime, ()| {
                 let mut sig = sig_run.lock().unwrap();
                 let mut prev_value = (sig.default_value)();
                 std::mem::swap(&mut prev_value, &mut sig.current_value);
                 let mut waiting: Option<Box<Continuation<V>>> = None;
                 std::mem::swap(&mut waiting, &mut sig.waiting_await);
                 if let Some(c) = waiting {
-                    runtime.on_current_instant(Box::new(move |runtime: &mut Runtime, ()| {
+                    runtime.on_current_instant(Box::new(move|runtime: &mut Runtime, ()| {
                         c.call_box(runtime, prev_value);
                     }));
                 }
@@ -95,7 +95,7 @@ impl<V, G> UCSignalRuntimeRef<V, G> where V: Sized + Send + Sync + 'static, G: '
         } else {
             if sig.waiting_present.is_empty() {
                 let sig_run = self.signal_runtime.clone();
-                runtime.on_end_of_instant(Box::new(move |runtime: &mut Runtime, ()| {
+                runtime.on_end_of_instant(Box::new(move|runtime: &mut Runtime, ()| {
                     let mut sig = sig_run.lock().unwrap();
                     while let Some(c) = sig.waiting_present.pop() {
                         c.call_box(runtime, false)
@@ -233,7 +233,7 @@ impl<V, G, P> Process for UCEmit<V, G, P> where V: Sized + Send + Sync + 'static
     fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
         let sig = self.signal.clone();
 
-        self.value.call(runtime, move |runtime: &mut Runtime, v| {
+        self.value.call(runtime, move|runtime: &mut Runtime, v| {
             sig.emit(runtime, v);
             c.call(runtime, ());
         });
@@ -244,7 +244,7 @@ impl<V, G, P> ProcessMut for UCEmit<V, G, P> where V: Sized + Send + Sync + 'sta
     fn call_mut<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<(Self, ())> {
         let sig = self.signal.clone();
 
-        self.value.call_mut(runtime, move |runtime: &mut Runtime, (process, v)| {
+        self.value.call_mut(runtime, move|runtime: &mut Runtime, (process, v)| {
             sig.clone().emit(runtime, v);
             c.call(runtime, (UCEmit {signal: sig, value: process}, ()));
         });
@@ -266,7 +266,7 @@ impl<V, G> Process for UCPresent<V, G> where V: Sized + Send + Sync + 'static, G
 impl<V, G> ProcessMut for UCPresent<V, G> where V: Sized + Send + Sync + 'static, G: 'static + Send + Sync {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, bool)> {
         let sig = self.signal.clone();
-        self.signal.test_present(runtime, move |runtime: &mut Runtime, status: bool| {
+        self.signal.test_present(runtime, move|runtime: &mut Runtime, status: bool| {
             next.call(runtime, (UCPresent {signal: sig}, status))
         });
     }

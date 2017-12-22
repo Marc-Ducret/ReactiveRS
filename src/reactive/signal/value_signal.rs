@@ -50,11 +50,11 @@ impl<V, G> VSignalRuntimeRef<V, G> where V: Clone + Send + Sync + 'static, G: Se
 
         {
             let sig_run = self.signal_runtime.clone();
-            runtime.on_end_of_instant(Box::new(move |runtime: &mut Runtime, ()| {
+            runtime.on_end_of_instant(Box::new(move|runtime: &mut Runtime, ()| {
                 let mut sig = sig_run.lock().unwrap();
                 while let Some(c) = sig.waiting_await.pop() {
                     let value = sig.current_value.clone();
-                    runtime.on_current_instant(Box::new(move |runtime: &mut Runtime, ()| {
+                    runtime.on_current_instant(Box::new(move|runtime: &mut Runtime, ()| {
                        c.call_box(runtime, value);
                     }));
                 }
@@ -88,7 +88,7 @@ impl<V, G> VSignalRuntimeRef<V, G> where V: Clone + Send + Sync + 'static, G: Se
         } else {
             if sig.waiting_present.is_empty() {
                 let sig_run = self.signal_runtime.clone();
-                runtime.on_end_of_instant(Box::new(move |runtime: &mut Runtime, ()| {
+                runtime.on_end_of_instant(Box::new(move|runtime: &mut Runtime, ()| {
                     let mut sig = sig_run.lock().unwrap();
                     while let Some(c) = sig.waiting_present.pop() {
                         c.call_box(runtime, false)
@@ -206,7 +206,7 @@ impl<V, G, P> Process for VEmit<V, G, P> where V: Clone + Send + Sync + 'static,
     fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
         let sig = self.signal.clone();
 
-        self.value.call(runtime, move |runtime: &mut Runtime, v| {
+        self.value.call(runtime, move|runtime: &mut Runtime, v| {
             sig.emit(runtime, v);
             c.call(runtime, ());
         });
@@ -217,7 +217,7 @@ impl<V, G, P> ProcessMut for VEmit<V, G, P> where V: Clone + Send + Sync + 'stat
     fn call_mut<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<(Self, ())> {
         let sig = self.signal.clone();
 
-        self.value.call_mut(runtime, move |runtime: &mut Runtime, (process, v)| {
+        self.value.call_mut(runtime, move|runtime: &mut Runtime, (process, v)| {
             sig.clone().emit(runtime, v);
             c.call(runtime, (VEmit {signal: sig, value: process}, ()));
         });
@@ -239,7 +239,7 @@ impl<V, G> Process for VPresent<V, G> where V: Clone + Send + Sync + 'static, G:
 impl<V, G> ProcessMut for VPresent<V, G> where V: Clone + Send + Sync + 'static, G: Send + Sync + 'static {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, bool)> {
         let sig = self.signal.clone();
-        self.signal.test_present(runtime, move |runtime: &mut Runtime, status: bool| {
+        self.signal.test_present(runtime, move|runtime: &mut Runtime, status: bool| {
             next.call(runtime, (VPresent {signal: sig}, status))
         });
     }

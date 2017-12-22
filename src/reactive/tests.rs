@@ -17,7 +17,7 @@ fn test_continuation() {
     let n = Arc::new(Mutex::new(0));
     let nn = n.clone();
     let mut runtime = SequentialRuntime::new();
-    let cont_print = Box::new(move |_run :&mut Runtime, ()| *nn.lock().unwrap() = 42);
+    let cont_print = Box::new(move|_run :&mut Runtime, ()| *nn.lock().unwrap() = 42);
     let cont_wait = Box::new(|run :&mut Runtime, ()| run.on_next_instant(cont_print));
     runtime.on_current_instant(cont_wait);
     assert_eq!(*n.lock().unwrap(), 0);
@@ -32,7 +32,7 @@ fn test_continuation_pause() {
     let n = Arc::new(Mutex::new(0));
     let nn = n.clone();
     let mut runtime = SequentialRuntime::new();
-    let cont_print = Box::new(move |_run :&mut Runtime, ()| *nn.lock().unwrap() = 42);
+    let cont_print = Box::new(move|_run :&mut Runtime, ()| *nn.lock().unwrap() = 42);
     let cont_wait = Box::new(cont_print.pause());
     runtime.on_current_instant(cont_wait);
     assert_eq!(*n.lock().unwrap(), 0);
@@ -50,7 +50,7 @@ fn test_process_flatten() {
     let p = value(value(42));
 
     assert_eq!(*n.lock().unwrap(), 0);
-    p.flatten().call(&mut runtime, move |_: &mut Runtime, val| *nn.lock().unwrap() = val);
+    p.flatten().call(&mut runtime, move|_: &mut Runtime, val| *nn.lock().unwrap() = val);
     assert_eq!(*n.lock().unwrap(), 42);
 }
 
@@ -58,7 +58,7 @@ fn test_process_flatten() {
 fn test_process_pause() {
     let n = Arc::new(Mutex::new(0));
     let nn = n.clone();
-    let p = value(42).pause().map(move |val| {
+    let p = value(42).pause().map(move|val| {
         *nn.lock().unwrap() = val;
     });
 
@@ -71,7 +71,7 @@ fn test_process_pause() {
 fn test_process_join() {
     let n = Arc::new(Mutex::new((0, 0)));
     let nn = n.clone();
-    let p = join(value(42), value(1337)).map(move |val| {
+    let p = join(value(42), value(1337)).map(move|val| {
         *nn.lock().unwrap() = val;
     });
 
@@ -91,7 +91,7 @@ fn test_process_while() {
     let n = Arc::new(Mutex::new(0));
     let nn = n.clone();
 
-    let iter = move |_| {
+    let iter = move|_| {
         let mut x = nn.lock().unwrap();
         *x = *x + 1;
         if *x == 42 {
@@ -128,12 +128,12 @@ fn test_signal_await() {
     let s =  PureSignal::new();
 
     let p = join(
-        s.await_immediate().map(move |()| {
+        s.await_immediate().map(move|()| {
             *nnn.lock().unwrap() = 1337;
         }),
-        value(()).map(move |()| {
+        value(()).map(move|()| {
             *nn.lock().unwrap() = 42;
-        }).pause().then(s.emit()).then(value(()).pause()).map(move |()| {
+        }).pause().then(s.emit()).then(value(()).pause()).map(move|()| {
             *nnnn.lock().unwrap() += 1;
         })
     );
@@ -154,12 +154,12 @@ fn test_signal_await_2() {
     sig_ref.signal_runtime.lock().unwrap().status = true;
 
     let p = join(
-        s.await_immediate().map(move |()| {
+        s.await_immediate().map(move|()| {
             *nnn.lock().unwrap() = 1337;
         }),
-        value(()).map(move |()| {
+        value(()).map(move|()| {
             *nn.lock().unwrap() = 42;
-        }).pause().then(s.emit()).then(value(()).pause()).map(move |()| {
+        }).pause().then(s.emit()).then(value(()).pause()).map(move|()| {
             *nnnn.lock().unwrap() += 1;
         })
     );
@@ -177,7 +177,7 @@ fn test_signal_present() {
     let m = Arc::new(Mutex::new(0));
     let mm = m.clone();
 
-    let iter = move |_| {
+    let iter = move|_| {
         let mut x = n.lock().unwrap();
         *x = *x + 1;
         if *x == 42 {
@@ -187,7 +187,7 @@ fn test_signal_present() {
         }
     };
 
-    let iter2 = move |_| {
+    let iter2 = move|_| {
         let mut x = mm.lock().unwrap();
         *x = *x + 2;
         LoopStatus::Continue

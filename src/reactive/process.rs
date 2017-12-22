@@ -54,7 +54,7 @@ impl<P, Q> Process for Then<P, Q> where P: Process, Q: Process {
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
         let p = self.p;
         let q = self.q;
-        p.call(runtime, move |runtime: &mut Runtime, _| q.call(runtime, next))
+        p.call(runtime, move|runtime: &mut Runtime, _| q.call(runtime, next))
     }
 }
 
@@ -62,7 +62,7 @@ impl<P, Q> ProcessMut for Then<P, Q> where P: ProcessMut, Q: ProcessMut {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
         let p = self.p;
         let q = self.q;
-        p.call_mut(runtime, move |runtime: &mut Runtime, (p, _): (P, P::Value)|
+        p.call_mut(runtime, move|runtime: &mut Runtime, (p, _): (P, P::Value)|
             q.call_mut(runtime, |runtime: &mut Runtime, (q, value): (Q, Q::Value)|
                 next.call(runtime, (p.then(q), value))
             )
@@ -91,7 +91,7 @@ pub fn execute_process<P>(p: P) -> P::Value where P: Process {
     let result = Arc::new(Mutex::new(None));
     let result_ref = result.clone();
     runtime.on_current_instant(Box::new(|run: &mut Runtime, _|
-        p.call(run, move |_: &mut Runtime, val| {
+        p.call(run, move|_: &mut Runtime, val| {
             let mut res = result_ref.lock().unwrap();
             *res = Some(val);
         })
@@ -111,7 +111,7 @@ pub fn execute_process_par<P>(p: P) -> P::Value where P: Process {
     let result = Arc::new(Mutex::new(None));
     let result_ref = result.clone();
     runtime.on_current_instant(Box::new(|run: &mut Runtime, _|
-        p.call(run, move |_: &mut Runtime, val| {
+        p.call(run, move|_: &mut Runtime, val| {
             let mut res = result_ref.lock().unwrap();
             *res = Some(val);
         })
@@ -179,7 +179,7 @@ impl<F, V, P> Process for Map<P, F>
     type Value = V;
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
         let f = self.map;
-        (self.process).call(runtime, move |runtime: &mut Runtime, x| (next.call(runtime, f(x))))
+        (self.process).call(runtime, move|runtime: &mut Runtime, x| (next.call(runtime, f(x))))
     }
 }
 
@@ -187,7 +187,7 @@ impl<F, V, P> ProcessMut for Map<P, F>
     where P: ProcessMut, F: FnMut(P::Value) -> V + Send + Sync + 'static, V: Send + Sync  {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
         let mut f: F = self.map;
-        self.process.call_mut(runtime, move |runtime: &mut Runtime, (p, x): (P, P::Value)| {
+        self.process.call_mut(runtime, move|runtime: &mut Runtime, (p, x): (P, P::Value)| {
             let y = f(x);
             next.call(runtime, (p.map(f), y))
         })
@@ -247,7 +247,7 @@ impl<P1, P2> Process for Join<P1, P2> where P1: Process, P2: Process {
             let jp = jp.clone();
             let p1 = self.p1;
             runtime.on_current_instant(Box::new(move|runtime: &mut Runtime, ()| {
-                p1.call(runtime, move |run: &mut Runtime, v1| {
+                p1.call(runtime, move|run: &mut Runtime, v1| {
                     let mut jp = jp.lock().unwrap();
                     jp.v1 = Some(v1);
                     jp.try_call_next(run)
@@ -258,7 +258,7 @@ impl<P1, P2> Process for Join<P1, P2> where P1: Process, P2: Process {
             let jp = jp.clone();
             let p2 = self.p2;
             runtime.on_current_instant(Box::new(move|runtime: &mut Runtime, ()| {
-                p2.call(runtime, move |run: &mut Runtime, v2| {
+                p2.call(runtime, move|run: &mut Runtime, v2| {
                     let mut jp = jp.lock().unwrap();
                     jp.v2 = Some(v2);
                     jp.try_call_next(run)
@@ -300,7 +300,7 @@ impl<P1, P2> ProcessMut for Join<P1, P2> where P1: ProcessMut, P2: ProcessMut {
             let jp = jp.clone();
             let p1 = self.p1;
             runtime.on_current_instant(Box::new(move|runtime: &mut Runtime, ()| {
-                p1.call_mut(runtime, move |run: &mut Runtime, (p1, v1)| {
+                p1.call_mut(runtime, move|run: &mut Runtime, (p1, v1)| {
                     let mut jp = jp.lock().unwrap();
                     jp.v1 = Some(v1);
                     jp.p1 = Some(p1);
@@ -479,7 +479,7 @@ impl<P, Q, R, V> Process for If<P, Q, R> where P: Process<Value = V>, Q: Process
         let p = self.process_if;
         let q = self.process_else;
         let r = self.process_cond;
-        r.call(runtime, move |runtime: &mut Runtime, cond: bool| {
+        r.call(runtime, move|runtime: &mut Runtime, cond: bool| {
             if cond {
                 p.call(runtime, next);
             } else {
@@ -495,7 +495,7 @@ impl<P, Q, R, V> ProcessMut for If<P, Q, R> where P: ProcessMut<Value = V>, Q: P
         let p = self.process_if;
         let q = self.process_else;
         let r = self.process_cond;
-        r.call_mut(runtime, move |runtime: &mut Runtime, (r, cond): (R, bool)| {
+        r.call_mut(runtime, move|runtime: &mut Runtime, (r, cond): (R, bool)| {
             if cond {
                 p.call_mut(runtime, next.map(|(p, v): (P, V)| (if_else(r, p, q), v)));
             } else {

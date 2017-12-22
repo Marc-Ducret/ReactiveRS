@@ -40,7 +40,7 @@ impl PSignalRuntimeRef {
 
         {
             let sig_run = self.signal_runtime.clone();
-            runtime.on_end_of_instant(Box::new(move |_: &mut Runtime, ()| {
+            runtime.on_end_of_instant(Box::new(move|_: &mut Runtime, ()| {
                 let mut sig = sig_run.lock().unwrap();
                 sig.status = false;
             }))
@@ -65,7 +65,7 @@ impl PSignalRuntimeRef {
         } else {
             if sig.waiting_present.is_empty() {
                 let sig_run = self.signal_runtime.clone();
-                runtime.on_end_of_instant(Box::new(move |runtime: &mut Runtime, ()| {
+                runtime.on_end_of_instant(Box::new(move|runtime: &mut Runtime, ()| {
                     let mut sig = sig_run.lock().unwrap();
                     while let Some(c) = sig.waiting_present.pop() {
                         c.call_box(runtime, false)
@@ -175,7 +175,7 @@ impl Process for PPresent {
 impl ProcessMut for PPresent {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, bool)> {
         let sig = self.signal.clone();
-        self.signal.test_present(runtime, move |runtime: &mut Runtime, status: bool| {
+        self.signal.test_present(runtime, move|runtime: &mut Runtime, status: bool| {
             next.call(runtime, (PPresent {signal: sig}, status))
         });
     }
