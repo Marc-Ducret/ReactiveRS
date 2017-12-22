@@ -26,8 +26,10 @@ impl TodoQueue {
     }
 
     fn push(&self, elem: Box<Continuation<()>>) {
-        let mut ct = self.count.lock().unwrap();
-        *ct = *ct + 1;
+        {
+            let mut ct = self.count.lock().unwrap();
+            *ct = *ct + 1;
+        }
         self.queue.push(elem);
     }
 
@@ -36,8 +38,10 @@ impl TodoQueue {
     }
 
     fn done(&self) {
-        let mut ct = self.count.lock().unwrap();
-        *ct = *ct - 1;
+        {
+            let mut ct = self.count.lock().unwrap();
+            *ct = *ct - 1;
+        }
         self.notify.notify_one();
     }
 
@@ -73,8 +77,10 @@ impl ParallelRuntime {
         for _ in 0..runtime.worker_count {
             let runtime = runtime.clone();
             let worker = move|| {
+                let mut local_runtime = LocalParallelRuntime {runtime: runtime.clone()};
                 loop {
-                    runtime.todo.pop().call_box(&mut LocalParallelRuntime {runtime: runtime.clone()}, ());
+                    let c = runtime.todo.pop();
+                    c.call_box(&mut local_runtime, ());
                     runtime.todo.done();
                 }
             };
@@ -89,12 +95,20 @@ impl ParallelRuntime {
             self.todo.push(self.current_instant.pop());
         }
         {
-            let mut ct = self.todo.count.lock().unwrap();
-            while *ct > 0 {
+            let mut work_remaining;
+            {
+                let ct = self.todo.count.lock().unwrap();
+                work_remaining = *ct > 0;
+            }
+            while work_remaining {
                 while !self.current_instant.is_empty() {
                     self.todo.push(self.current_instant.pop());
                 }
-                ct = self.todo.notify.wait(ct).unwrap();
+                let mut ct = self.todo.count.lock().unwrap();
+                if *ct > 0 {
+                    ct = self.todo.notify.wait(ct).unwrap();
+                }
+                work_remaining = *ct > 0 || !self.current_instant.is_empty();
             }
         }
         while !self.end_instant.is_empty() {
