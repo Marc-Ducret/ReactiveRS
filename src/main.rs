@@ -32,11 +32,15 @@ fn main() {
     let s = ValueSignal::new(0, Box::new(|x, y| x+y));
 
     let conti: LoopStatus<()> = LoopStatus::Continue;
-    let p = s.emit(value(1)).then(value(conti).pause()).while_loop();
+    let mut ps = Vec::new();
+    for _ in 0..100000 {
+        ps.push(s.emit(value(1)).then(value(conti).pause()).while_loop());
+    }
+    let p = multi_join(ps);
     let print = |x| {
         println!("x = {}", x);
         x
     };
     let q = s.emit(s.await().map(print)).then(value(conti)).while_loop();
-    execute_process_par(join(p, q));
+    execute_process(join(p, q));
 }

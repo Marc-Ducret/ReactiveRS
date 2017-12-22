@@ -63,7 +63,7 @@ fn test_process_pause() {
     });
 
     assert_eq!(*n.lock().unwrap(), 0);
-    execute_process_par(p);
+    execute_process(p);
     assert_eq!(*n.lock().unwrap(), 42);
 }
 
@@ -76,14 +76,14 @@ fn test_process_join() {
     });
 
     assert_eq!(*n.lock().unwrap(), (0, 0));
-    execute_process_par(p);
+    execute_process(p);
     assert_eq!(*n.lock().unwrap(), (42, 1337));
 }
 
 
 #[test]
 fn test_process_return() {
-    assert_eq!(execute_process_par(value(42)), 42);
+    assert_eq!(execute_process(value(42)), 42);
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn test_process_while() {
     ).while_loop();
 
     assert_eq!(*n.lock().unwrap(), 0);
-    execute_process_par(p);
+    execute_process(p);
     assert_eq!(*n.lock().unwrap(), 42);
 }
 
@@ -116,7 +116,7 @@ fn test_process_if() {
                     if_else(value(true), value(1), value(2)),
                     if_else(value(true), value(3), value(4)));
 
-    assert_eq!(execute_process_par(p), 3);
+    assert_eq!(execute_process(p), 3);
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn test_signal_await() {
     );
 
     assert_eq!(*n.lock().unwrap(), 0);
-    execute_process_par(p);
+    execute_process(p);
     assert_eq!(*n.lock().unwrap(), 1338);
 }
 
@@ -165,7 +165,7 @@ fn test_signal_await_2() {
     );
 
     assert_eq!(*n.lock().unwrap(), 0);
-    execute_process_par(p);
+    execute_process(p);
     assert_eq!(*n.lock().unwrap(), 43);
 }
 
@@ -200,7 +200,7 @@ fn test_signal_present() {
     let q = if_else(s.present(), value(()).map(iter2), value(LoopStatus::Exit(()))).pause().while_loop();
 
     assert_eq!(*m.lock().unwrap(), 0);
-    execute_process_par(join(p, q));
+    execute_process(join(p, q));
     assert_eq!(*m.lock().unwrap(), 42 * 2);
 }
 
@@ -209,9 +209,9 @@ fn test_value_signal() {
     timeout_ms(|| {
         let s: ValueSignal<i32, i32> = ValueSignal::new(0, Box::new(|x, y| x + y));
 
-        assert_eq!(execute_process_par(join(s.emit(value(1)).then(s.emit(value(5))), s.await())), ((), 6));
-        assert_eq!(execute_process_par(join(s.emit(value(1)).then(s.emit(value(5)).pause()), s.await())), ((), 1));
-        assert_eq!(execute_process_par(join(
+        assert_eq!(execute_process(join(s.emit(value(1)).then(s.emit(value(5))), s.await())), ((), 6));
+        assert_eq!(execute_process(join(s.emit(value(1)).then(s.emit(value(5)).pause()), s.await())), ((), 1));
+        assert_eq!(execute_process(join(
             s.emit(value(2)).then(s.emit(value(5)).pause()).then(s.emit(value(15)).pause()),
             join(
                 s.await(),
@@ -232,7 +232,7 @@ fn test_unique_consumer_signal() {
                 v
             }));
 
-    assert_eq!(execute_process_par(join(s_prod.emit(value(1)).then(s_prod.emit(value(5))), s_cons.await())), ((), vec![1, 5]));
+    assert_eq!(execute_process(join(s_prod.emit(value(1)).then(s_prod.emit(value(5))), s_cons.await())), ((), vec![1, 5]));
 
     let (s_prod, s_cons): (UniqueConsumerSignalProducer<Vec<i32>, i32>, UniqueConsumerSignalConsumer<Vec<i32>, i32>) =
         UniqueConsumerSignalProducer::new(
@@ -242,7 +242,7 @@ fn test_unique_consumer_signal() {
               v
             }));
 
-    assert_eq!(execute_process_par(join(s_prod.emit(value(1)).then(s_prod.emit(value(5)).pause()), s_cons.await())), ((), vec![1]));
+    assert_eq!(execute_process(join(s_prod.emit(value(1)).then(s_prod.emit(value(5)).pause()), s_cons.await())), ((), vec![1]));
 }
 
 #[test]
@@ -250,7 +250,7 @@ fn test_unique_producer_signal() {
     let (s_prod, s_cons): (UniqueProducerSignalProducer<i32>, UniqueProducerSignalConsumer<i32>) =
         UniqueProducerSignalProducer::new(0);
 
-    assert_eq!(execute_process_par(join(s_prod.emit(value(1)), join(s_cons.await_immediate(), s_cons.await_immediate()))), ((), (1, 1)));
+    assert_eq!(execute_process(join(s_prod.emit(value(1)), join(s_cons.await_immediate(), s_cons.await_immediate()))), ((), (1, 1)));
 }
 
 #[test]

@@ -178,7 +178,6 @@ impl<F, V, P> Process for Map<P, F>
     where P: Process, F: FnOnce(P::Value) -> V + Send + Sync + 'static, V: Send + Sync  {
     type Value = V;
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
-        //self.continuation is a process
         let f = self.map;
         (self.process).call(runtime, move |runtime: &mut Runtime, x| (next.call(runtime, f(x))))
     }
@@ -187,7 +186,6 @@ impl<F, V, P> Process for Map<P, F>
 impl<F, V, P> ProcessMut for Map<P, F>
     where P: ProcessMut, F: FnMut(P::Value) -> V + Send + Sync + 'static, V: Send + Sync  {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
-        //self.continuation is a process
         let mut f: F = self.map;
         self.process.call_mut(runtime, move |runtime: &mut Runtime, (p, x): (P, P::Value)| {
             let y = f(x);
@@ -222,119 +220,229 @@ pub struct Join<P1, P2> { p1: P1, p2: P2 }
 impl<P1, P2> Process for Join<P1, P2> where P1: Process, P2: Process {
     type Value = (P1::Value, P2::Value);
     fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
-        struct JoinPoint<T1, T2, C> where T1: Send + Sync, T2: Send + Sync {
-            x1: Option<T1>,
-            x2: Option<T2>,
+        struct JoinPoint<V1, V2, C> where V1: Send + Sync, V2: Send + Sync {
+            v1: Option<V1>,
+            v2: Option<V2>,
             next: Option<C>
         }
 
-        impl<T1, T2, C> JoinPoint<T1, T2, C> where C: Continuation<(T1, T2)>, T1: Send + Sync, T2: Send + Sync {
-            fn call_continuation(&mut self, run: &mut Runtime) {
-                if self.x1.is_some() {
-                    if self.x2.is_some() {
-                        let next = self.next.take();
-                        let x1 = self.x1.take();
-                        let x2 = self.x2.take();
-                        if let Some(y1) = x1 {
-                            if let Some(y2) = x2 {
-                                if let Some(cont) = next {
-                                    cont.call(run, (y1, y2));
-                                }
-                            }
-                        }
-                    }
+        impl<V1, V2, C> JoinPoint<V1, V2, C> where C: Continuation<(V1, V2)>, V1: Send + Sync, V2: Send + Sync {
+            fn try_call_next(&mut self, run: &mut Runtime) {
+                if self.is_filled() {
+                    let next = self.next.take().unwrap();
+                    let v1 = self.v1.take().unwrap();
+                    let v2 = self.v2.take().unwrap();
+                    next.call(run, (v1, v2));
                 }
+            }
+
+            fn is_filled(&self) -> bool {
+                self.v1.is_some() && self.v2.is_some() && self.next.is_some()
             }
         };
 
-        let jp = Arc::new(Mutex::new(JoinPoint{x1: None, x2: None, next: Some(next)}));
+        let jp = Arc::new(Mutex::new(JoinPoint{v1: None, v2: None, next: Some(next)}));
 
         {
             let jp = jp.clone();
-            self.p1.call(runtime, move |run: &mut Runtime, x1| {
-                let mut jp = jp.lock().unwrap();
-                jp.x1 = Some(x1);
-                jp.call_continuation(run)
-            });
+            let p1 = self.p1;
+            runtime.on_current_instant(Box::new(move|runtime: &mut Runtime, ()| {
+                p1.call(runtime, move |run: &mut Runtime, v1| {
+                    let mut jp = jp.lock().unwrap();
+                    jp.v1 = Some(v1);
+                    jp.try_call_next(run)
+                });
+            }));
         }
-
         {
             let jp = jp.clone();
-            self.p2.call(runtime, move |run: &mut Runtime, x2| {
-                let mut jp = jp.lock().unwrap();
-                jp.x2 = Some(x2);
-                jp.call_continuation(run)
-            });
+            let p2 = self.p2;
+            runtime.on_current_instant(Box::new(move|runtime: &mut Runtime, ()| {
+                p2.call(runtime, move |run: &mut Runtime, v2| {
+                    let mut jp = jp.lock().unwrap();
+                    jp.v2 = Some(v2);
+                    jp.try_call_next(run)
+                });
+            }));
         }
     }
 }
 
 impl<P1, P2> ProcessMut for Join<P1, P2> where P1: ProcessMut, P2: ProcessMut {
     fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
-        struct JoinPoint<T1, T2, P1, P2, C> where P1: ProcessMut, P2: ProcessMut {
-            x1: Option<T1>,
-            x2: Option<T2>,
-            op1: Option<P1>,
-            op2: Option<P2>,
+        struct JoinPoint<V1, V2, P1, P2, C> where P1: ProcessMut, P2: ProcessMut {
+            v1: Option<V1>,
+            v2: Option<V2>,
+            p1: Option<P1>,
+            p2: Option<P2>,
             next: Option<C>
         }
 
-        impl<T1, T2, P1, P2, C> JoinPoint<T1, T2, P1, P2, C> where C: Continuation<(Join<P1, P2>, (T1, T2))>, P1: ProcessMut, P2: ProcessMut, T1: Send + Sync, T2: Send + Sync {
-            fn call_continuation(&mut self, run: &mut Runtime, mut op1: Option<P1>, mut op2: Option<P2>) {
-                if op1.is_some() {
-                    self.op1 = op1.take();
+        impl<V1, V2, P1, P2, C> JoinPoint<V1, V2, P1, P2, C> where C: Continuation<(Join<P1, P2>, (V1, V2))>, P1: ProcessMut, P2: ProcessMut, V1: Send + Sync, V2: Send + Sync {
+            fn try_call_next(&mut self, run: &mut Runtime) {
+                if self.is_filled() {
+                    let next = self.next.take().unwrap();
+                    let v1 = self.v1.take().unwrap();
+                    let v2 = self.v2.take().unwrap();
+                    let p1 = self.p1.take().unwrap();
+                    let p2 = self.p2.take().unwrap();
+                    next.call(run, (Join {p1, p2}, (v1, v2)));
                 }
-                if op2.is_some() {
-                    self.op2 = op2.take();
-                }
-                if self.x1.is_some() {
-                    if self.x2.is_some() {
-                        let next = self.next.take();
-                        let x1 = self.x1.take();
-                        let x2 = self.x2.take();
-                        let op1 = self.op1.take();
-                        let op2 = self.op2.take();
-                        if let Some(y1) = x1 {
-                            if let Some(y2) = x2 {
-                                if let Some(cont) = next {
-                                    if let Some(p1) = op1 {
-                                        if let Some(p2) = op2 {
-                                            cont.call(run, (Join {p1, p2}, (y1, y2)));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            }
+
+            fn is_filled(&self) -> bool {
+                self.v1.is_some() && self.v2.is_some() && self.next.is_some() && self.p1.is_some() && self.p2.is_some()
             }
         };
 
-        let jp = Arc::new(Mutex::new(JoinPoint{x1: None, x2: None, op1: None, op2: None, next: Some(next)}));
-
-
+        let jp = Arc::new(Mutex::new(JoinPoint{v1: None, v2: None, p1: None, p2: None, next: Some(next)}));
         {
             let jp = jp.clone();
-            self.p1.call_mut(runtime, move |run: &mut Runtime, (p1, x1)| {
-                let mut jp = jp.lock().unwrap();
-                jp.x1 = Some(x1);
-                jp.call_continuation(run, Some(p1), None)
-            });
+            let p1 = self.p1;
+            runtime.on_current_instant(Box::new(move|runtime: &mut Runtime, ()| {
+                p1.call_mut(runtime, move |run: &mut Runtime, (p1, v1)| {
+                    let mut jp = jp.lock().unwrap();
+                    jp.v1 = Some(v1);
+                    jp.p1 = Some(p1);
+                    jp.try_call_next(run)
+                });
+            }));
         }
-
         {
             let jp = jp.clone();
-            self.p2.call_mut(runtime, move |run: &mut Runtime, (p2, x2)| {
-                let mut jp = jp.lock().unwrap();
-                jp.x2 = Some(x2);
-                jp.call_continuation(run, None, Some(p2))
-            });
+            let p2 = self.p2;
+            runtime.on_current_instant(Box::new(move|runtime: &mut Runtime, ()| {
+                p2.call_mut(runtime, move|run: &mut Runtime, (p2, v2)| {
+                    let mut jp = jp.lock().unwrap();
+                    jp.v2 = Some(v2);
+                    jp.p2 = Some(p2);
+                    jp.try_call_next(run)
+                });
+            }));
         }
     }
 }
 
-pub fn join<P1, P2>(p1: P1, p2: P2) -> Join<P1, P2> {
+pub fn join<P1, P2>(p1: P1, p2: P2) -> Join<P1, P2> where P1: Process, P2: Process {
     Join {p1, p2}
+}
+
+pub struct MultiJoin<P> where P: Process {
+    processes: Vec<P>
+}
+
+impl<P> Process for MultiJoin<P> where P: Process {
+    type Value = Vec<P::Value>;
+
+    fn call<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<Self::Value> {
+        struct JoinPoint<V, C> where C: Continuation<Vec<V>>, V: Send + Sync {
+            results: Vec<Option<V>>,
+            next: Option<C>,
+        }
+
+        impl<V, C> JoinPoint<V, C> where C: Continuation<Vec<V>>, V: Send + Sync {
+            fn try_call_next(&mut self, runtime: &mut Runtime) {
+                if self.is_filled() {
+                    let next = self.next.take().unwrap();
+                    let mut results = Vec::new();
+                    for ref mut res in &mut self.results {
+                        results.push(res.take().unwrap());
+                    }
+                    next.call(runtime, results);
+                }
+            }
+
+            fn is_filled(&self) -> bool {
+                let mut filled = self.next.is_some();
+                for ref res in &self.results {
+                    filled = filled && res.is_some();
+                }
+                return filled
+            }
+        }
+
+        let mut results = Vec::with_capacity(self.processes.len());
+        for _ in 0..self.processes.len() { results.push(None); }
+        let jp = Arc::new(Mutex::new(JoinPoint{results, next: Some(c)}));
+
+        let mut ct = 0;
+        for process in self.processes {
+            let jp = jp.clone();
+            let cur = ct;
+            runtime.on_current_instant(Box::new(move|runtime: &mut Runtime, ()| {
+                process.call(runtime, move|runtime: &mut Runtime, res| {
+                    let mut jp = jp.lock().unwrap();
+                    jp.results[cur] = Some(res);
+                    jp.try_call_next(runtime);
+                });
+            }));
+            ct = ct + 1;
+        }
+    }
+}
+
+impl<P> ProcessMut for MultiJoin<P> where P: ProcessMut {
+    fn call_mut<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<(Self, Self::Value)> {
+        struct JoinPoint<P, V, C> where P: ProcessMut<Value = V>, C: Continuation<(MultiJoin<P>, Vec<V>)>, V: Send + Sync {
+            results: Vec<Option<V>>,
+            processes: Vec<Option<P>>,
+            next: Option<C>,
+        }
+
+        impl<P, V, C> JoinPoint<P, V, C> where P: ProcessMut<Value = V>, C: Continuation<(MultiJoin<P>, Vec<V>)>, V: Send + Sync {
+            fn try_call_next(&mut self, runtime: &mut Runtime) {
+                if self.is_filled() {
+                    let next = self.next.take().unwrap();
+                    let n = self.results.len();
+                    let mut results = Vec::with_capacity(n);
+                    let mut processes = Vec::with_capacity(n);
+                    for ref mut res in &mut self.results {
+                        results.push(res.take().unwrap());
+                    }
+                    for ref mut p in &mut self.processes {
+                        processes.push(p.take().unwrap());
+                    }
+                    next.call(runtime, (multi_join(processes), results));
+                }
+            }
+
+            fn is_filled(&self) -> bool {
+                let mut filled = self.next.is_some();
+                for ref res in &self.results {
+                    filled = filled && res.is_some();
+                }
+                for ref p in &self.processes {
+                    filled = filled && p.is_some();
+                }
+                return filled
+            }
+        }
+
+        let mut results = Vec::with_capacity(self.processes.len());
+        for _ in 0..self.processes.len() { results.push(None); }
+        let mut processes = Vec::with_capacity(self.processes.len());
+        for _ in 0..self.processes.len() { processes.push(None); }
+        let jp = Arc::new(Mutex::new(JoinPoint{results, processes, next: Some(c)}));
+
+        let mut ct = 0;
+        for process in self.processes {
+            let jp = jp.clone();
+            let cur = ct;
+            runtime.on_current_instant(Box::new(move|runtime: &mut Runtime, ()| {
+                process.call_mut (runtime, move|runtime: &mut Runtime, (process, res)| {
+                    let mut jp = jp.lock().unwrap();
+                    jp.results[cur] = Some(res);
+                    jp.processes[cur] = Some(process);
+                    jp.try_call_next(runtime);
+                });
+            }));
+            ct = ct + 1;
+        }
+    }
+}
+
+pub fn multi_join<P>(processes: Vec<P>) -> MultiJoin<P> where P: Process {
+    MultiJoin{processes}
 }
 
 pub struct While<P> {
