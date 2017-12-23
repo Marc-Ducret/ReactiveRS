@@ -366,9 +366,13 @@ pub fn redstone_sim() {
             }
             if Some(Button::Keyboard(Key::Backspace)) == e.press_args(){
                 app.zoom *= zoom_step;
+                app.tx *= zoom_step;
+                app.ty *= zoom_step;
             }
             if Some(Button::Keyboard(Key::Return)) == e.press_args(){
                 app.zoom /= zoom_step;
+                app.tx == zoom_step;
+                app.ty == zoom_step;
             }
             if Some(Button::Keyboard(Key::Left)) == e.press_args(){
                 app.tx += app.zoom;
