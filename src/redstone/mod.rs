@@ -38,8 +38,8 @@ enum Type {
 
 fn displace((x, y): (usize, usize), dir: Direction) -> (usize, usize){
     match dir {
-        Direction::SOUTH => return (x  , y-1),
-        Direction::NORTH => return (x  , y+1),
+        Direction::SOUTH => return (x  , y+1),
+        Direction::NORTH => return (x  , y-1),
         Direction::EAST  => return (x+1, y  ),
         Direction::WEST  => return (x-1, y  ),
     }
@@ -280,7 +280,7 @@ pub fn redstone_sim() {
         let is_powered = |power| {
             power != ZERO_POWER
         };
-        let mut emit_near = Vec::new();
+        let mut emit_near = vec!(power_at((x, y)).emit(value(MAX_POWER)));
         for d in vec!(Direction::NORTH, Direction::SOUTH, Direction::EAST, Direction::WEST) {
             if d != invert_dir(dir) {
                 emit_near.push(power_at(displace((x, y), d)).emit(value(MAX_POWER)))
@@ -312,9 +312,9 @@ pub fn redstone_sim() {
         };
         let powers_ref = powers.clone();
         let draw = move|_| {
-            use std::thread;
-            use std::time::Duration;
-            thread::sleep(Duration::from_millis(10));
+//            use std::thread;
+//            use std::time::Duration;
+//            thread::sleep(Duration::from_millis(1));
             let mut dpowers = display_powers_ref.lock().unwrap();
             let powers = powers_ref.lock().unwrap();
             dpowers.clone_from(&powers);
@@ -342,7 +342,7 @@ pub fn redstone_sim() {
 
         let mut window: Window = WindowSettings::new(
                 "redstone",
-                [500, 500]
+                [750, 750]
             )
             .opengl(opengl)
             .exit_on_esc(true)
@@ -399,6 +399,6 @@ pub fn redstone_sim() {
         }
     });
 
-    execute_process_par(multi_join(p_redstone).join(multi_join(p_inverter)).join(display_process()));
+    execute_process(multi_join(p_redstone).join(multi_join(p_inverter)).join(display_process()));
 
 }
