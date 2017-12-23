@@ -287,7 +287,7 @@ pub fn redstone_sim() {
             }
         }
         let continue_loop: LoopStatus<()> = LoopStatus::Continue;
-        input.emit(value(ZERO_POWER)).then(if_else(input.await().map(is_powered), value(()), multi_join(emit_near).then(value(())))).then(value(continue_loop)).while_loop()
+        input.emit(value(ZERO_POWER)).then(if_else(input.await().map(is_powered), value(()), multi_join(emit_near).then(display_signal.emit(value((x, y, MAX_POWER)))).then(value(())))).then(value(continue_loop)).while_loop()
     };
 
     let display_powers: Arc<Mutex<Vec<Power>>> = Arc::new(Mutex::new(vec![ZERO_POWER; w*h]));
