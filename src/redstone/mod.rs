@@ -237,8 +237,15 @@ pub fn redstone_sim() {
     let (blocks, w, h) = read_file(String::from("map.txt"));
 
     let mut power_signal = Vec::new();
-    for _ in 0..(w*h) {
-        power_signal.push(ValueSignal::new(ZERO_POWER, Box::new(|x: Power, y: Power| max_p(x, y))));
+    for i in 0..(w*h) {
+        let filter =
+            match blocks[i] {
+                Type::VOID => ZERO_POWER,
+                Type::BLOCK => ATOMIC_POWER,
+                Type::REDSTONE(filter) => filter,
+                Type::INVERTER(_) => ATOMIC_POWER
+            };
+        power_signal.push(ValueSignal::new(ZERO_POWER, Box::new(move |x: Power, y: Power| max_p(x, y) * filter)));
     }
     let display_signal = ValueSignal::new(vec!(), Box::new(|entries: Vec<(usize, usize, Power)>, entry: (usize, usize, Power)| {
         let mut entries = entries.clone();
