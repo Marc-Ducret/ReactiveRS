@@ -29,6 +29,7 @@ enum Direction {
     WEST
 }
 
+#[derive(Clone, Copy)]
 enum Type {
     VOID,
     BLOCK,
@@ -275,14 +276,23 @@ pub fn redstone_sim() {
             .then(value(continue_loop)).while_loop()
     };
 
+    let blocks_copy = blocks.clone();
     let redstone_torch_process = |x: usize, y: usize, dir: Direction| {
         let input = power_at(displace((x, y), invert_dir(dir)));
         let is_powered = |power| {
             power != ZERO_POWER
         };
+        let should_emit = |pos| {
+            let (x, y) = pos;
+            match blocks_copy[x+w*y] {
+                Type::REDSTONE(_) => true,
+                Type::BLOCK => true,
+                _ => false
+            }
+        };
         let mut emit_near = vec!(power_at((x, y)).emit(value(MAX_POWER)));
         for d in vec!(Direction::NORTH, Direction::SOUTH, Direction::EAST, Direction::WEST) {
-            if d != invert_dir(dir) {
+            if d != invert_dir(dir) && should_emit(displace((x, y), d)) {
                 emit_near.push(power_at(displace((x, y), d)).emit(value(MAX_POWER)))
             }
         }
