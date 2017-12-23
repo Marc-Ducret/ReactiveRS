@@ -158,7 +158,7 @@ impl App {
         const POWER_MAX:   u8  = 15;
 
         let square = rectangle::square(0.0, 0.0, PIXEL_SIZE);
-        let innerSquare = rectangle::square(0.0, 0.0, PIXEL_SIZE-2.0*BORDER_SIZE);
+        let inner_square = rectangle::square(0.0, 0.0, PIXEL_SIZE-2.0*BORDER_SIZE);
         let rect = rectangle::rectangle_by_corners(0.0, 0.0, PIXEL_SIZE, PIXEL_SIZE/3.0);
 
         for i in 0..(self.width*self.height) {
@@ -177,17 +177,17 @@ impl App {
                         let transform = c.transform.trans(x, y);
                         rectangle(BLOCK_COLOR_OUT, square, transform, gl);
                         let transform = c.transform.trans(x+BORDER_SIZE, y+BORDER_SIZE);
-                        rectangle(BLOCK_COLOR_IN, innerSquare, transform, gl);
+                        rectangle(BLOCK_COLOR_IN, inner_square, transform, gl);
                     });
                 },
                 Type::REDSTONE(r, g, b) => {
-                    fn colorComposant(isPresent: bool, power: u8) -> f32 {
-                        if isPresent { 0.5 + 0.5*((power as f32)/(POWER_MAX as f32)) } else { 0.0 }
+                    fn color_composant(is_present: bool, power: u8) -> f32 {
+                        if is_present { 0.5 + 0.5*((power as f32)/(POWER_MAX as f32)) } else { 0.0 }
                     }
                     let color: [f32; 4] = [
-                        colorComposant(r, self.powers[i].r),
-                        colorComposant(g, self.powers[i].g),
-                        colorComposant(b, self.powers[i].b),
+                        color_composant(r, self.powers[i].r),
+                        color_composant(g, self.powers[i].g),
+                        color_composant(b, self.powers[i].b),
                         1.0
                     ];
                     self.gl.draw(args.viewport(), |c, gl| {
@@ -216,7 +216,6 @@ impl App {
     }
 
     fn update(&mut self, args: &UpdateArgs) {
-        // Rotate 2 radians per second.
         // args.dt
     }
 }
@@ -244,7 +243,7 @@ pub fn redstone_sim() {
         let continue_loop: LoopStatus<()> = LoopStatus::Continue;
         let input = power_at((x, y));
         let combine_with_pos = move|power| (x, y, power);
-        let uncombine = move|(x, y, power)| power;
+        let uncombine = move|(_x, _y, power)| power;
         input.emit(
             power_at((x + 1, y    )).emit(
                 power_at((x - 1, y    )).emit(
@@ -306,7 +305,7 @@ pub fn redstone_sim() {
             match blocks[x + y * w] {
                 Type::VOID => (),
                 Type::BLOCK => (),
-                Type::REDSTONE(r, g, b) => p_redstone.push(redstone_wire_process(x, y)),
+                Type::REDSTONE(_, _, _) => p_redstone.push(redstone_wire_process(x, y)),
                 Type::INVERTER(dir) => p_inverter.push(redstone_torch_process(x, y, dir)),
             }
         }
