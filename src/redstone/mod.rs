@@ -151,7 +151,10 @@ pub struct App {
     powers: Vec<Power>,
     blocks: Vec<Type>,
     width: usize,
-    height: usize
+    height: usize,
+    zoom: f64,
+    tx: f64,
+    ty: f64
 }
 
 impl App {
@@ -162,17 +165,22 @@ impl App {
         const BLOCK_COLOR_OUT:  [f32; 4] = [0.9, 0.9, 0.9, 1.0];
         const BLOCK_COLOR_IN:   [f32; 4] = [0.5, 0.5, 0.5, 1.0];
         const RED:   [f32; 4] = [1.0, 0.0, 0.0, 1.0];
-        const PIXEL_SIZE:  f64 = 10.0;
         const BORDER_SIZE: f64 = 2.0;
         const POWER_MAX:   u8  = 15;
 
-        let square = rectangle::square(0.0, 0.0, PIXEL_SIZE);
-        let inner_square = rectangle::square(0.0, 0.0, PIXEL_SIZE-2.0*BORDER_SIZE);
-        let rect = rectangle::rectangle_by_corners(0.0, 0.0, PIXEL_SIZE, PIXEL_SIZE/3.0);
+        self.gl.draw(args.viewport(), |c, gl| {
+            clear(VOID_COLOR, gl);
+        });
+
+        let pixel_size = self.zoom;
+
+        let square = rectangle::square(0.0, 0.0, pixel_size);
+        let inner_square = rectangle::square(0.0, 0.0, pixel_size-2.0*BORDER_SIZE);
+        let rect = rectangle::rectangle_by_corners(0.0, 0.0, pixel_size, pixel_size/3.0);
 
         for i in 0..(self.width*self.height) {
             let (ix, iy) = (i%self.width, i/self.width);
-            let (x, y) = ((ix as f64)*PIXEL_SIZE, (iy as f64)*PIXEL_SIZE);
+            let (x, y) = ((ix as f64)*pixel_size+self.tx, (iy as f64)*pixel_size+self.ty);
 
             match self.blocks[i] {
                 Type::VOID => {
@@ -213,8 +221,8 @@ impl App {
                             Direction::EAST => 3.0,
                             Direction::WEST => 1.0
                         };
-                        let transform = c.transform.trans(x, y).trans(PIXEL_SIZE/2.0, PIXEL_SIZE/2.0).rot_rad(angle).trans(-PIXEL_SIZE/2.0, -PIXEL_SIZE/2.0);
-                        let transform2 = transform.rot_rad(pi/2.0).trans(0.0, -PIXEL_SIZE*(0.5+1.0/6.0));
+                        let transform = c.transform.trans(x, y).trans(pixel_size/2.0, pixel_size/2.0).rot_rad(angle).trans(-pixel_size/2.0, -pixel_size/2.0);
+                        let transform2 = transform.rot_rad(pi/2.0).trans(0.0, -pixel_size*(0.5+1.0/6.0));
                         rectangle(VOID_COLOR, square, transform, gl);
                         rectangle(RED, rect, transform, gl);
                         rectangle(RED, rect, transform2, gl);
@@ -332,13 +340,20 @@ pub fn redstone_sim() {
             .build()
             .unwrap();
 
+        let zoom_step: f64 = f64::powf(2.0, 1.0/7.0);
+        const ZOOM_INIT: f64 = 10.0;
+
         let mut app = App {
             gl: GlGraphics::new(opengl),
             powers: vec![ZERO_POWER; blocks.len()],
             blocks: blocks,
             width: w,
-            height: h
+            height: h,
+            zoom: ZOOM_INIT,
+            tx: 0.0,
+            ty: 0.0
         };
+
 
         let mut events = Events::new(EventSettings::new());
         while let Some(e) = events.next(&mut window) {
@@ -348,6 +363,24 @@ pub fn redstone_sim() {
                     app.powers.clone_from(&dpowers)
                 }
                 app.render(&r);
+            }
+            if Some(Button::Keyboard(Key::Backspace)) == e.press_args(){
+                app.zoom *= zoom_step;
+            }
+            if Some(Button::Keyboard(Key::Return)) == e.press_args(){
+                app.zoom /= zoom_step;
+            }
+            if Some(Button::Keyboard(Key::Left)) == e.press_args(){
+                app.tx += app.zoom;
+            }
+            if Some(Button::Keyboard(Key::Right)) == e.press_args(){
+                app.tx -= app.zoom;
+            }
+            if Some(Button::Keyboard(Key::Up)) == e.press_args(){
+                app.ty += app.zoom;
+            }
+            if Some(Button::Keyboard(Key::Down)) == e.press_args(){
+                app.ty -= app.zoom;
             }
         }
     });
