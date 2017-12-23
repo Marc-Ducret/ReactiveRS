@@ -164,7 +164,6 @@ impl App {
         const VOID_COLOR:       [f32; 4] = [0.0, 0.0, 0.0, 1.0];
         const BLOCK_COLOR_OUT:  [f32; 4] = [0.9, 0.9, 0.9, 1.0];
         const BLOCK_COLOR_IN:   [f32; 4] = [0.5, 0.5, 0.5, 1.0];
-        const RED:   [f32; 4] = [1.0, 0.0, 0.0, 1.0];
         const BORDER_SIZE: f64 = 2.0;
         const POWER_MAX:   u8  = 15;
 
@@ -182,6 +181,18 @@ impl App {
             let (ix, iy) = (i%self.width, i/self.width);
             let (x, y) = ((ix as f64)*pixel_size+self.tx, (iy as f64)*pixel_size+self.ty);
 
+            fn color_composant(is_present: bool, power: u8) -> f32 {
+                if is_present { 0.5 + 0.5*((power as f32)/(POWER_MAX as f32)) } else { 0.0 }
+            }
+            fn get_color(r: u8, g: u8, b: u8, power: Power) -> [f32; 4] {
+                [
+                    color_composant(r > 0, power.r),
+                    color_composant(g > 0, power.g),
+                    color_composant(b > 0, power.b),
+                    1.0
+                ]
+            }
+
             match self.blocks[i] {
                 Type::VOID => {
                     self.gl.draw(args.viewport(), |c, gl| {
@@ -198,21 +209,14 @@ impl App {
                     });
                 },
                 Type::REDSTONE(Power{r, g, b}) => {
-                    fn color_composant(is_present: bool, power: u8) -> f32 {
-                        if is_present { 0.5 + 0.5*((power as f32)/(POWER_MAX as f32)) } else { 0.0 }
-                    }
-                    let color: [f32; 4] = [
-                        color_composant(r > 0, self.powers[i].r),
-                        color_composant(g > 0, self.powers[i].g),
-                        color_composant(b > 0, self.powers[i].b),
-                        1.0
-                    ];
+                    let color = get_color(r, g, b, self.powers[i]);
                     self.gl.draw(args.viewport(), |c, gl| {
                         let transform = c.transform.trans(x, y);
                         rectangle(color, square, transform, gl);
                     });
                 },
                 Type::INVERTER(ref dir) => {
+                    let color = get_color(1, 1, 1, self.powers[i]);
                     self.gl.draw(args.viewport(), |c, gl| {
                         let pi = std::f64::consts::PI;
                         let angle = pi/2.0 * match *dir {
@@ -223,9 +227,8 @@ impl App {
                         };
                         let transform = c.transform.trans(x, y).trans(pixel_size/2.0, pixel_size/2.0).rot_rad(angle).trans(-pixel_size/2.0, -pixel_size/2.0);
                         let transform2 = transform.rot_rad(pi/2.0).trans(0.0, -pixel_size*(0.5+1.0/6.0));
-                        rectangle(VOID_COLOR, square, transform, gl);
-                        rectangle(RED, rect, transform, gl);
-                        rectangle(RED, rect, transform2, gl);
+                        rectangle(color, rect, transform, gl);
+                        rectangle(color, rect, transform2, gl);
                     });
                 }
             }
