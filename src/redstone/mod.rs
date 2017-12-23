@@ -1,4 +1,15 @@
+extern crate std;
 extern crate reactive_rs;
+extern crate piston;
+extern crate graphics;
+extern crate glutin_window;
+extern crate opengl_graphics;
+
+use self::piston::window::WindowSettings;
+use self::piston::event_loop::*;
+use self::piston::input::*;
+use self::glutin_window::GlutinWindow as Window;
+use self::opengl_graphics::{ GlGraphics, OpenGL };
 
 use reactive_rs::reactive::process::*;
 use reactive_rs::reactive::signal::value_signal::*;
@@ -6,6 +17,11 @@ use reactive_rs::reactive::signal::value_signal::*;
 use std::ops::{Add, Sub};
 use std::cmp::max;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::fs::File;
+use std::io::prelude::*;
+
+
 
 #[derive(PartialEq, Clone, Copy)]
 enum Direction {
@@ -80,20 +96,133 @@ const ZERO_POWER: Power = Power{r: 0x0, g: 0x0, b: 0x0};
 const ATOMIC_POWER: Power = Power{r: 0x1, g: 0x1, b: 0x1};
 const MAX_POWER: Power = Power{r: 0xF, g: 0xF, b: 0xF};
 
-pub fn redstone_sim() {
-    let h = 32;
-    let w = 32;
+fn read_file(filename: String) -> (Vec<Type>, usize, usize) {
+    let mut file = File::open(filename).unwrap();
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).unwrap();
 
-    let mut blocks = Vec::new();
-    for _ in 0..(w*h) {
-        blocks.push(Type::VOID);
+    let mut blocks: Vec<Type> = Vec::new();
+    let mut width = 0;
+    let mut height = 0;
+
+    let mut lines = contents.lines();
+    while let Some(line) = lines.next() {
+        if height == 0 {
+            width = line.len();
+        } else {
+            assert_eq!(width, line.len());
+        }
+        height += 1;
+        let mut chars = line.chars();
+        while let Some(ch) = chars.next() {
+            blocks.push(match ch {
+                ' ' => Type::VOID,
+                '#' => Type::BLOCK,
+                'r' => Type::REDSTONE(true,  false, false),
+                'g' => Type::REDSTONE(false, true,  false),
+                'b' => Type::REDSTONE(false, false, true ),
+                'y' => Type::REDSTONE(true,  true,  false),
+                'p' => Type::REDSTONE(true,  false, true ),
+                'c' => Type::REDSTONE(false, true,  true ),
+                'w' => Type::REDSTONE(true,  true,  true ),
+                '^' => Type::INVERTER(Direction::NORTH),
+                'v' => Type::INVERTER(Direction::SOUTH),
+                '<' => Type::INVERTER(Direction::WEST),
+                '>' => Type::INVERTER(Direction::EAST),
+                _ => panic!("Not a valid character")
+            });
+        }
     }
-    for x in 0..w {
-        blocks[x] = Type::REDSTONE(true, true, true);
+
+    (blocks, width, height)
+}
+
+pub struct App {
+    gl: GlGraphics, // OpenGL drawing backend.
+    powers: Vec<Power>,
+    blocks: Vec<Type>,
+    width: usize,
+    height: usize
+}
+
+impl App {
+    fn render(&mut self, args: &RenderArgs) {
+        use self::graphics::*;
+
+        const VOID_COLOR:       [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+        const BLOCK_COLOR_OUT:  [f32; 4] = [0.9, 0.9, 0.9, 1.0];
+        const BLOCK_COLOR_IN:   [f32; 4] = [0.5, 0.5, 0.5, 1.0];
+        const RED:   [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+        const PIXEL_SIZE:  f64 = 10.0;
+        const BORDER_SIZE: f64 = 2.0;
+        const POWER_MAX:   u8  = 15;
+
+        let square = rectangle::square(0.0, 0.0, PIXEL_SIZE);
+        let innerSquare = rectangle::square(0.0, 0.0, PIXEL_SIZE-2.0*BORDER_SIZE);
+        let rect = rectangle::rectangle_by_corners(0.0, 0.0, PIXEL_SIZE, PIXEL_SIZE/3.0);
+
+        for i in 0..(self.width*self.height) {
+            let (ix, iy) = (i%self.width, i/self.width);
+            let (x, y) = ((ix as f64)*PIXEL_SIZE, (iy as f64)*PIXEL_SIZE);
+
+            match self.blocks[i] {
+                Type::VOID => {
+                    self.gl.draw(args.viewport(), |c, gl| {
+                        let transform = c.transform.trans(x, y);
+                        rectangle(VOID_COLOR, square, transform, gl);
+                    });
+                },
+                Type::BLOCK => {
+                    self.gl.draw(args.viewport(), |c, gl| {
+                        let transform = c.transform.trans(x, y);
+                        rectangle(BLOCK_COLOR_OUT, square, transform, gl);
+                        let transform = c.transform.trans(x+BORDER_SIZE, y+BORDER_SIZE);
+                        rectangle(BLOCK_COLOR_IN, innerSquare, transform, gl);
+                    });
+                },
+                Type::REDSTONE(r, g, b) => {
+                    fn colorComposant(isPresent: bool, power: u8) -> f32 {
+                        if isPresent { 0.5 + 0.5*((power as f32)/(POWER_MAX as f32)) } else { 0.0 }
+                    }
+                    let color: [f32; 4] = [
+                        colorComposant(r, self.powers[i].r),
+                        colorComposant(g, self.powers[i].g),
+                        colorComposant(b, self.powers[i].b),
+                        1.0
+                    ];
+                    self.gl.draw(args.viewport(), |c, gl| {
+                        let transform = c.transform.trans(x, y);
+                        rectangle(color, square, transform, gl);
+                    });
+                },
+                Type::INVERTER(ref dir) => {
+                    self.gl.draw(args.viewport(), |c, gl| {
+                        let pi = std::f64::consts::PI;
+                        let angle = pi/2.0 * match *dir {
+                            Direction::SOUTH => 0.0,
+                            Direction::NORTH => 2.0,
+                            Direction::EAST => 3.0,
+                            Direction::WEST => 1.0
+                        };
+                        let transform = c.transform.trans(x, y).trans(PIXEL_SIZE/2.0, PIXEL_SIZE/2.0).rot_rad(angle).trans(-PIXEL_SIZE/2.0, -PIXEL_SIZE/2.0);
+                        let transform2 = transform.rot_rad(pi/2.0).trans(0.0, -PIXEL_SIZE*(0.5+1.0/6.0));
+                        rectangle(VOID_COLOR, square, transform, gl);
+                        rectangle(RED, rect, transform, gl);
+                        rectangle(RED, rect, transform2, gl);
+                    });
+                }
+            }
+        }
     }
-    blocks[5] = Type::INVERTER(Direction::EAST);
-    blocks[19] = Type::INVERTER(Direction::EAST);
-    blocks[30] = Type::INVERTER(Direction::EAST);
+
+    fn update(&mut self, args: &UpdateArgs) {
+        // Rotate 2 radians per second.
+        // args.dt
+    }
+}
+
+pub fn redstone_sim() {
+    let (blocks, w, h) = read_file(String::from("map.txt"));
 
     let mut power_signal = Vec::new();
     for _ in 0..(w*h) {
@@ -141,6 +270,9 @@ pub fn redstone_sim() {
         input.emit(value(ZERO_POWER)).then(if_else(input.await().map(is_powered), value(()), multi_join(emit_near).then(value(())))).then(value(continue_loop)).while_loop()
     };
 
+    let display_powers: Arc<Mutex<Vec<Power>>> = Arc::new(Mutex::new(vec![ZERO_POWER; w*h]));
+    let display_powers_ref = display_powers.clone();
+
     let display_process = || {
         let mut powers = Vec::new();
         for _ in 0..(w*h) {
@@ -160,14 +292,9 @@ pub fn redstone_sim() {
         };
         let powers_ref = powers.clone();
         let draw = move|_| {
+            let mut dpowers = display_powers_ref.lock().unwrap();
             let powers = powers_ref.lock().unwrap();
-            for y in 0..h {
-                for x in 0..w {
-                    print!("{:X}", (*powers)[x + y * w].r);
-                }
-                println!();
-            }
-            println!("----------------------------")
+            dpowers.clone_from(&powers);
         };
         display_signal.await().map(read_entries).map(draw).then(value(continue_loop)).while_loop()
     };
@@ -184,5 +311,46 @@ pub fn redstone_sim() {
             }
         }
     }
+
+    let display_powers_ref = display_powers.clone();
+    thread::spawn(move || {
+        //let opengl = OpenGL::V2_1;
+        let opengl = OpenGL::V3_2;
+
+        let mut window: Window = WindowSettings::new(
+                "redstone",
+                [500, 500]
+            )
+            .opengl(opengl)
+            .exit_on_esc(true)
+            .srgb(false) // Necessary due to issue #139 of piston_window.
+            .build()
+            .unwrap();
+
+        let mut app = App {
+            gl: GlGraphics::new(opengl),
+            powers: vec![ZERO_POWER; blocks.len()],
+            blocks: blocks,
+            width: w,
+            height: h
+        };
+
+        let mut events = Events::new(EventSettings::new());
+        while let Some(e) = events.next(&mut window) {
+            if let Some(r) = e.render_args() {
+                {
+                    let mut dpowers = display_powers_ref.lock().unwrap();
+                    app.powers.clone_from(&dpowers)
+                }
+                app.render(&r);
+            }
+
+            if let Some(u) = e.update_args() {
+                app.update(&u);
+            }
+        }
+    });
+
     execute_process_par(multi_join(p_redstone).join(multi_join(p_inverter)).join(display_process()));
+
 }
