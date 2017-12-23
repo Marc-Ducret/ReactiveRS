@@ -14,14 +14,12 @@ use self::opengl_graphics::{ GlGraphics, OpenGL };
 use reactive_rs::reactive::process::*;
 use reactive_rs::reactive::signal::value_signal::*;
 
-use std::ops::{Add, Sub};
+use std::ops::{Add, Sub, Mul};
 use std::cmp::max;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::fs::File;
 use std::io::prelude::*;
-
-
 
 #[derive(PartialEq, Clone, Copy)]
 enum Direction {
@@ -34,7 +32,7 @@ enum Direction {
 enum Type {
     VOID,
     BLOCK,
-    REDSTONE(bool, bool, bool),
+    REDSTONE(Power),
     INVERTER(Direction),
 }
 
@@ -85,11 +83,22 @@ impl Sub for Power {
     }
 }
 
+impl Mul for Power {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
+        return Power{
+            r: self.r * other.r,
+            g: self.g * other.g,
+            b: self.b * other.b}
+    }
+}
+
 fn max_p(p: Power, q: Power) -> Power {
     Power{
         r: max(p.r, q.r),
-        g: max(p.r, q.r),
-        b: max(p.r, q.r)}
+        g: max(p.g, q.g),
+        b: max(p.b, q.b)}
 }
 
 const ZERO_POWER: Power = Power{r: 0x0, g: 0x0, b: 0x0};
@@ -116,15 +125,15 @@ fn read_file(filename: String) -> (Vec<Type>, usize, usize) {
         let mut chars = line.chars();
         while let Some(ch) = chars.next() {
             blocks.push(match ch {
-                ' ' => Type::VOID,
+                '.' => Type::VOID,
                 '#' => Type::BLOCK,
-                'r' => Type::REDSTONE(true,  false, false),
-                'g' => Type::REDSTONE(false, true,  false),
-                'b' => Type::REDSTONE(false, false, true ),
-                'y' => Type::REDSTONE(true,  true,  false),
-                'p' => Type::REDSTONE(true,  false, true ),
-                'c' => Type::REDSTONE(false, true,  true ),
-                'w' => Type::REDSTONE(true,  true,  true ),
+                'r' => Type::REDSTONE(Power{r: 0x1, g: 0x0, b: 0x0}),
+                'g' => Type::REDSTONE(Power{r: 0x0, g: 0x1, b: 0x0}),
+                'b' => Type::REDSTONE(Power{r: 0x0, g: 0x0, b: 0x1}),
+                'y' => Type::REDSTONE(Power{r: 0x1, g: 0x1, b: 0x0}),
+                'p' => Type::REDSTONE(Power{r: 0x1, g: 0x0, b: 0x1}),
+                'c' => Type::REDSTONE(Power{r: 0x0, g: 0x1, b: 0x1}),
+                'w' => Type::REDSTONE(Power{r: 0x1, g: 0x1, b: 0x1}),
                 '^' => Type::INVERTER(Direction::NORTH),
                 'v' => Type::INVERTER(Direction::SOUTH),
                 '<' => Type::INVERTER(Direction::WEST),
@@ -180,14 +189,14 @@ impl App {
                         rectangle(BLOCK_COLOR_IN, inner_square, transform, gl);
                     });
                 },
-                Type::REDSTONE(r, g, b) => {
+                Type::REDSTONE(Power{r, g, b}) => {
                     fn color_composant(is_present: bool, power: u8) -> f32 {
                         if is_present { 0.5 + 0.5*((power as f32)/(POWER_MAX as f32)) } else { 0.0 }
                     }
                     let color: [f32; 4] = [
-                        color_composant(r, self.powers[i].r),
-                        color_composant(g, self.powers[i].g),
-                        color_composant(b, self.powers[i].b),
+                        color_composant(r > 0, self.powers[i].r),
+                        color_composant(g > 0, self.powers[i].g),
+                        color_composant(b > 0, self.powers[i].b),
                         1.0
                     ];
                     self.gl.draw(args.viewport(), |c, gl| {
@@ -214,10 +223,6 @@ impl App {
             }
         }
     }
-
-    fn update(&mut self, args: &UpdateArgs) {
-        // args.dt
-    }
 }
 
 pub fn redstone_sim() {
@@ -234,15 +239,13 @@ pub fn redstone_sim() {
     }));
     let power_at = |(x, y): (usize, usize)| power_signal[(x % w) + (y % h) * w].clone();
 
-    let redstone_wire_process = |x: usize, y: usize| {
+    let redstone_wire_process = |x: usize, y: usize, filter: Power| {
         let decr = |x: Power| {
-            use std::thread;
-            thread::sleep_ms(100);
             max_p(x, ATOMIC_POWER) - ATOMIC_POWER
         };
         let continue_loop: LoopStatus<()> = LoopStatus::Continue;
         let input = power_at((x, y));
-        let combine_with_pos = move|power| (x, y, power);
+        let combine_with_pos = move|power| (x, y, power * filter);
         let uncombine = move|(_x, _y, power)| power;
         input.emit(
             power_at((x + 1, y    )).emit(
@@ -291,6 +294,9 @@ pub fn redstone_sim() {
         };
         let powers_ref = powers.clone();
         let draw = move|_| {
+            use std::thread;
+            use std::time::Duration;
+            thread::sleep(Duration::from_millis(10));
             let mut dpowers = display_powers_ref.lock().unwrap();
             let powers = powers_ref.lock().unwrap();
             dpowers.clone_from(&powers);
@@ -305,7 +311,7 @@ pub fn redstone_sim() {
             match blocks[x + y * w] {
                 Type::VOID => (),
                 Type::BLOCK => (),
-                Type::REDSTONE(_, _, _) => p_redstone.push(redstone_wire_process(x, y)),
+                Type::REDSTONE(filter) => p_redstone.push(redstone_wire_process(x, y, filter)),
                 Type::INVERTER(dir) => p_inverter.push(redstone_torch_process(x, y, dir)),
             }
         }
@@ -342,10 +348,6 @@ pub fn redstone_sim() {
                     app.powers.clone_from(&dpowers)
                 }
                 app.render(&r);
-            }
-
-            if let Some(u) = e.update_args() {
-                app.update(&u);
             }
         }
     });
