@@ -55,7 +55,7 @@ fn invert_dir(dir: Direction) -> Direction {
     }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, PartialOrd)]
 struct Power {
     r: u8,
     g: u8,
@@ -104,6 +104,189 @@ fn max_p(p: Power, q: Power) -> Power {
 
 const ZERO_POWER: Power = Power{r: 0x0, g: 0x0, b: 0x0};
 const ATOMIC_POWER: Power = Power{r: 0x1, g: 0x1, b: 0x1};
+pub fn redstone_sim() {
+    let (blocks, w, h) = read_file(String::from("map.txt"));
+
+    let mut power_signal = Vec::new();
+    for i in 0..(w*h) {
+        let filter =
+            match blocks[i] {
+                Type::VOID => ZERO_POWER,
+                Type::BLOCK => ATOMIC_POWER,
+                Type::REDSTONE(filter) => filter,
+                Type::INVERTER(_) => ATOMIC_POWER
+            };
+        power_signal.push(ValueSignal::new(ZERO_POWER, Box::new(move |x: Power, y: Power| max_p(x, y) * filter)));
+    }
+    let display_signal = ValueSignal::new(vec!(), Box::new(|entries: Vec<(usize, usize, Power)>, entry: (usize, usize, Power)| {
+        let mut entries = entries.clone();
+        entries.push(entry);
+        entries
+    }));
+    let power_at = |(x, y): (usize, usize)| power_signal[(x % w) + (y % h) * w].clone();
+
+    let redstone_wire_process = |x: usize, y: usize, filter: Power| {
+        let mut remember = ZERO_POWER;
+        let decr = move|x: Power| {
+            if x < remember {
+                remember = ZERO_POWER;
+                return ZERO_POWER;
+            } else {
+                remember = x;
+                return max_p(x, ATOMIC_POWER) - ATOMIC_POWER;
+            }
+        };
+        let continue_loop: LoopStatus<()> = LoopStatus::Continue;
+        let input = power_at((x, y));
+        let combine_with_pos = move|power| (x, y, power * filter);
+        let uncombine = move|(_x, _y, power)| power;
+        input.emit(
+            power_at((x + 1, y    )).emit(
+                power_at((x - 1, y    )).emit(
+                    power_at((x    , y + 1)).emit(
+                        power_at((x    , y - 1)).emit(
+                            display_signal.emit(
+                                input.await().map(combine_with_pos)).map(uncombine).map(decr))))))
+            .then(value(continue_loop)).while_loop()
+    };
+
+    let blocks_copy = blocks.clone();
+    let redstone_torch_process = |x: usize, y: usize, dir: Direction| {
+        let input = power_at(displace((x, y), invert_dir(dir)));
+        let is_powered = |power| {
+            power != ZERO_POWER
+        };
+        let should_emit = |pos| {
+            let (x, y) = pos;
+            match blocks_copy[x+w*y] {
+                Type::REDSTONE(_) => true,
+                Type::BLOCK => true,
+                _ => false
+            }
+        };
+        let mut emit_near = vec!(power_at((x, y)).emit(value(MAX_POWER)));
+        for d in vec!(Direction::NORTH, Direction::SOUTH, Direction::EAST, Direction::WEST) {
+            if d != invert_dir(dir) && should_emit(displace((x, y), d)) {
+                emit_near.push(power_at(displace((x, y), d)).emit(value(MAX_POWER)))
+            }
+        }
+        let continue_loop: LoopStatus<()> = LoopStatus::Continue;
+        input.emit(value(ZERO_POWER)).then(if_else(input.await().map(is_powered), value(()), multi_join(emit_near).then(display_signal.emit(value((x, y, MAX_POWER)))).then(value(())))).then(value(continue_loop)).while_loop()
+    };
+
+    let display_powers: Arc<Mutex<Vec<Power>>> = Arc::new(Mutex::new(vec![ZERO_POWER; w*h]));
+    let display_powers_ref = display_powers.clone();
+
+    let display_process = || {
+        let mut powers = Vec::new();
+        for _ in 0..(w*h) {
+            powers.push(ZERO_POWER);
+        }
+        let powers: Arc<Mutex<Vec<Power>>> = Arc::new(Mutex::new(powers));
+        let continue_loop: LoopStatus<()> = LoopStatus::Continue;
+        let powers_ref = powers.clone();
+        let read_entries = move|entries: Vec<(usize, usize, Power)>| {
+            let mut powers = powers_ref.lock().unwrap();
+            for i in 0..(w*h) {
+                (*powers)[i] = ZERO_POWER;
+            }
+            for (x, y, power) in entries {
+                (*powers)[x + y * w] = power;
+            }
+        };
+        let powers_ref = powers.clone();
+        let draw = move|_| {
+            use std::thread;
+            use std::time::Duration;
+            thread::sleep(Duration::from_millis(10));
+            let mut dpowers = display_powers_ref.lock().unwrap();
+            let powers = powers_ref.lock().unwrap();
+            dpowers.clone_from(&powers);
+        };
+        display_signal.await().map(read_entries).map(draw).then(value(continue_loop)).while_loop()
+    };
+
+    let mut p_redstone = Vec::new();
+    let mut p_inverter = Vec::new();
+    for x in 0..w {
+        for y in 0..h {
+            match blocks[x + y * w] {
+                Type::VOID => (),
+                Type::BLOCK => (),
+                Type::REDSTONE(filter) => p_redstone.push(redstone_wire_process(x, y, filter)),
+                Type::INVERTER(dir) => p_inverter.push(redstone_torch_process(x, y, dir)),
+            }
+        }
+    }
+
+    let display_powers_ref = display_powers.clone();
+    thread::spawn(move || {
+        //let opengl = OpenGL::V2_1;
+        let opengl = OpenGL::V3_2;
+
+        let mut window: Window = WindowSettings::new(
+            "redstone",
+            [750, 750]
+        )
+            .opengl(opengl)
+            .exit_on_esc(true)
+            .srgb(false) // Necessary due to issue #139 of piston_window.
+            .build()
+            .unwrap();
+
+        let zoom_step: f64 = f64::powf(2.0, 1.0/7.0);
+        const ZOOM_INIT: f64 = 10.0;
+
+        let mut app = App {
+            gl: GlGraphics::new(opengl),
+            powers: vec![ZERO_POWER; blocks.len()],
+            blocks: blocks,
+            width: w,
+            height: h,
+            zoom: ZOOM_INIT,
+            tx: 0.0,
+            ty: 0.0
+        };
+
+
+        let mut events = Events::new(EventSettings::new());
+        while let Some(e) = events.next(&mut window) {
+            if let Some(r) = e.render_args() {
+                {
+                    let mut dpowers = display_powers_ref.lock().unwrap();
+                    app.powers.clone_from(&dpowers)
+                }
+                app.render(&r);
+            }
+            if Some(Button::Keyboard(Key::Backspace)) == e.press_args(){
+                app.zoom *= zoom_step;
+                app.tx *= zoom_step;
+                app.ty *= zoom_step;
+            }
+            if Some(Button::Keyboard(Key::Return)) == e.press_args(){
+                app.zoom /= zoom_step;
+                app.tx == zoom_step;
+                app.ty == zoom_step;
+            }
+            if Some(Button::Keyboard(Key::Left)) == e.press_args(){
+                app.tx += app.zoom;
+            }
+            if Some(Button::Keyboard(Key::Right)) == e.press_args(){
+                app.tx -= app.zoom;
+            }
+            if Some(Button::Keyboard(Key::Up)) == e.press_args(){
+                app.ty += app.zoom;
+            }
+            if Some(Button::Keyboard(Key::Down)) == e.press_args(){
+                app.ty -= app.zoom;
+            }
+        }
+    });
+
+    execute_process(multi_join(p_redstone).join(multi_join(p_inverter)).join(display_process()));
+
+}
+
 const MAX_POWER: Power = Power{r: 0xF, g: 0xF, b: 0xF};
 
 fn read_file(filename: String) -> (Vec<Type>, usize, usize) {
@@ -235,180 +418,4 @@ impl App {
             }
         }
     }
-}
-
-pub fn redstone_sim() {
-    let (blocks, w, h) = read_file(String::from("map.txt"));
-
-    let mut power_signal = Vec::new();
-    for i in 0..(w*h) {
-        let filter =
-            match blocks[i] {
-                Type::VOID => ZERO_POWER,
-                Type::BLOCK => ATOMIC_POWER,
-                Type::REDSTONE(filter) => filter,
-                Type::INVERTER(_) => ATOMIC_POWER
-            };
-        power_signal.push(ValueSignal::new(ZERO_POWER, Box::new(move |x: Power, y: Power| max_p(x, y) * filter)));
-    }
-    let display_signal = ValueSignal::new(vec!(), Box::new(|entries: Vec<(usize, usize, Power)>, entry: (usize, usize, Power)| {
-        let mut entries = entries.clone();
-        entries.push(entry);
-        entries
-    }));
-    let power_at = |(x, y): (usize, usize)| power_signal[(x % w) + (y % h) * w].clone();
-
-    let redstone_wire_process = |x: usize, y: usize, filter: Power| {
-        let decr = |x: Power| {
-            max_p(x, ATOMIC_POWER) - ATOMIC_POWER
-        };
-        let continue_loop: LoopStatus<()> = LoopStatus::Continue;
-        let input = power_at((x, y));
-        let combine_with_pos = move|power| (x, y, power * filter);
-        let uncombine = move|(_x, _y, power)| power;
-        input.emit(
-            power_at((x + 1, y    )).emit(
-                power_at((x - 1, y    )).emit(
-                    power_at((x    , y + 1)).emit(
-                        power_at((x    , y - 1)).emit(
-                            display_signal.emit(
-                                input.await().map(combine_with_pos)).map(uncombine).map(decr))))))
-            .then(value(continue_loop)).while_loop()
-    };
-
-    let blocks_copy = blocks.clone();
-    let redstone_torch_process = |x: usize, y: usize, dir: Direction| {
-        let input = power_at(displace((x, y), invert_dir(dir)));
-        let is_powered = |power| {
-            power != ZERO_POWER
-        };
-        let should_emit = |pos| {
-            let (x, y) = pos;
-            match blocks_copy[x+w*y] {
-                Type::REDSTONE(_) => true,
-                Type::BLOCK => true,
-                _ => false
-            }
-        };
-        let mut emit_near = vec!(power_at((x, y)).emit(value(MAX_POWER)));
-        for d in vec!(Direction::NORTH, Direction::SOUTH, Direction::EAST, Direction::WEST) {
-            if d != invert_dir(dir) && should_emit(displace((x, y), d)) {
-                emit_near.push(power_at(displace((x, y), d)).emit(value(MAX_POWER)))
-            }
-        }
-        let continue_loop: LoopStatus<()> = LoopStatus::Continue;
-        input.emit(value(ZERO_POWER)).then(if_else(input.await().map(is_powered), value(()), multi_join(emit_near).then(display_signal.emit(value((x, y, MAX_POWER)))).then(value(())))).then(value(continue_loop)).while_loop()
-    };
-
-    let display_powers: Arc<Mutex<Vec<Power>>> = Arc::new(Mutex::new(vec![ZERO_POWER; w*h]));
-    let display_powers_ref = display_powers.clone();
-
-    let display_process = || {
-        let mut powers = Vec::new();
-        for _ in 0..(w*h) {
-            powers.push(ZERO_POWER);
-        }
-        let powers: Arc<Mutex<Vec<Power>>> = Arc::new(Mutex::new(powers));
-        let continue_loop: LoopStatus<()> = LoopStatus::Continue;
-        let powers_ref = powers.clone();
-        let read_entries = move|entries: Vec<(usize, usize, Power)>| {
-            let mut powers = powers_ref.lock().unwrap();
-            for i in 0..(w*h) {
-                (*powers)[i] = ZERO_POWER;
-            }
-            for (x, y, power) in entries {
-                (*powers)[x + y * w] = power;
-            }
-        };
-        let powers_ref = powers.clone();
-        let draw = move|_| {
-//            use std::thread;
-//            use std::time::Duration;
-//            thread::sleep(Duration::from_millis(1));
-            let mut dpowers = display_powers_ref.lock().unwrap();
-            let powers = powers_ref.lock().unwrap();
-            dpowers.clone_from(&powers);
-        };
-        display_signal.await().map(read_entries).map(draw).then(value(continue_loop)).while_loop()
-    };
-
-    let mut p_redstone = Vec::new();
-    let mut p_inverter = Vec::new();
-    for x in 0..w {
-        for y in 0..h {
-            match blocks[x + y * w] {
-                Type::VOID => (),
-                Type::BLOCK => (),
-                Type::REDSTONE(filter) => p_redstone.push(redstone_wire_process(x, y, filter)),
-                Type::INVERTER(dir) => p_inverter.push(redstone_torch_process(x, y, dir)),
-            }
-        }
-    }
-
-    let display_powers_ref = display_powers.clone();
-    thread::spawn(move || {
-        //let opengl = OpenGL::V2_1;
-        let opengl = OpenGL::V3_2;
-
-        let mut window: Window = WindowSettings::new(
-                "redstone",
-                [750, 750]
-            )
-            .opengl(opengl)
-            .exit_on_esc(true)
-            .srgb(false) // Necessary due to issue #139 of piston_window.
-            .build()
-            .unwrap();
-
-        let zoom_step: f64 = f64::powf(2.0, 1.0/7.0);
-        const ZOOM_INIT: f64 = 10.0;
-
-        let mut app = App {
-            gl: GlGraphics::new(opengl),
-            powers: vec![ZERO_POWER; blocks.len()],
-            blocks: blocks,
-            width: w,
-            height: h,
-            zoom: ZOOM_INIT,
-            tx: 0.0,
-            ty: 0.0
-        };
-
-
-        let mut events = Events::new(EventSettings::new());
-        while let Some(e) = events.next(&mut window) {
-            if let Some(r) = e.render_args() {
-                {
-                    let mut dpowers = display_powers_ref.lock().unwrap();
-                    app.powers.clone_from(&dpowers)
-                }
-                app.render(&r);
-            }
-            if Some(Button::Keyboard(Key::Backspace)) == e.press_args(){
-                app.zoom *= zoom_step;
-                app.tx *= zoom_step;
-                app.ty *= zoom_step;
-            }
-            if Some(Button::Keyboard(Key::Return)) == e.press_args(){
-                app.zoom /= zoom_step;
-                app.tx == zoom_step;
-                app.ty == zoom_step;
-            }
-            if Some(Button::Keyboard(Key::Left)) == e.press_args(){
-                app.tx += app.zoom;
-            }
-            if Some(Button::Keyboard(Key::Right)) == e.press_args(){
-                app.tx -= app.zoom;
-            }
-            if Some(Button::Keyboard(Key::Up)) == e.press_args(){
-                app.ty += app.zoom;
-            }
-            if Some(Button::Keyboard(Key::Down)) == e.press_args(){
-                app.ty -= app.zoom;
-            }
-        }
-    });
-
-    execute_process(multi_join(p_redstone).join(multi_join(p_inverter)).join(display_process()));
-
 }
