@@ -1,5 +1,5 @@
 #![feature(conservative_impl_trait)]
-#![type_length_limit="16777216"]
+#![type_length_limit="33554432"]
 
 extern crate reactive_rs;
 

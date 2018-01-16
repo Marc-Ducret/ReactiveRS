@@ -35,6 +35,7 @@ enum Type {
     BLOCK,
     REDSTONE(Power),
     INVERTER(Direction),
+    USER,
 }
 
 fn displace((x, y): (usize, usize), dir: Direction) -> (usize, usize){
@@ -55,7 +56,7 @@ fn invert_dir(dir: Direction) -> Direction {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, PartialOrd)]
+#[derive(PartialEq, Clone, Copy)]
 struct Power {
     r: u8,
     g: u8,
@@ -94,6 +95,18 @@ impl Mul for Power {
             b: self.b * other.b}
     }
 }
+//
+//impl Power {
+//    fn less_than(self, other: Power) -> bool {
+//           self.r <= other.r
+//        && self.g <= other.g
+//        && self.b <= other.b
+//        && (
+//               self.r < other.r
+//            || self.g < other.g
+//            || self.b < other.b)
+//    }
+//}
 
 fn max_p(p: Power, q: Power) -> Power {
     Power{
@@ -104,6 +117,8 @@ fn max_p(p: Power, q: Power) -> Power {
 
 const ZERO_POWER: Power = Power{r: 0x0, g: 0x0, b: 0x0};
 const ATOMIC_POWER: Power = Power{r: 0x1, g: 0x1, b: 0x1};
+const MAX_POWER: Power = Power{r: 0xF, g: 0xF, b: 0xF};
+
 pub fn redstone_sim() {
     let (blocks, w, h) = read_file(String::from("map.txt"));
 
@@ -114,9 +129,12 @@ pub fn redstone_sim() {
                 Type::VOID => ZERO_POWER,
                 Type::BLOCK => ATOMIC_POWER,
                 Type::REDSTONE(filter) => filter,
-                Type::INVERTER(_) => ATOMIC_POWER
+                Type::INVERTER(_) => ATOMIC_POWER,
+                Type::USER => ATOMIC_POWER,
             };
-        power_signal.push(ValueSignal::new(ZERO_POWER, Box::new(move |x: Power, y: Power| max_p(x, y) * filter)));
+        power_signal.push(ValueSignal::new(ZERO_POWER, Box::new(move |x: Power, y: Power| {
+            max_p(x, y) * filter
+        })));
     }
     let display_signal = ValueSignal::new(vec!(), Box::new(|entries: Vec<(usize, usize, Power)>, entry: (usize, usize, Power)| {
         let mut entries = entries.clone();
@@ -126,15 +144,9 @@ pub fn redstone_sim() {
     let power_at = |(x, y): (usize, usize)| power_signal[(x % w) + (y % h) * w].clone();
 
     let redstone_wire_process = |x: usize, y: usize, filter: Power| {
-        let mut remember = ZERO_POWER;
-        let decr = move|x: Power| {
-            if x < remember {
-                remember = ZERO_POWER;
-                return ZERO_POWER;
-            } else {
-                remember = x;
-                return max_p(x, ATOMIC_POWER) - ATOMIC_POWER;
-            }
+
+        let decr = move|p: Power| {
+            max_p(p, ATOMIC_POWER) - ATOMIC_POWER
         };
         let continue_loop: LoopStatus<()> = LoopStatus::Continue;
         let input = power_at((x, y));
@@ -171,7 +183,23 @@ pub fn redstone_sim() {
             }
         }
         let continue_loop: LoopStatus<()> = LoopStatus::Continue;
-        input.emit(value(ZERO_POWER)).then(if_else(input.await().map(is_powered), value(()), multi_join(emit_near).then(display_signal.emit(value((x, y, MAX_POWER)))).then(value(())))).then(value(continue_loop)).while_loop()
+        let p = input.emit(value(ZERO_POWER)).then(if_else(input.await().map(is_powered), value(()), multi_join(emit_near).then(display_signal.emit(value((x, y, MAX_POWER)))).then(value(()))));
+        p.then(value(continue_loop)).while_loop()
+    };
+
+    let user_press = Arc::new(Mutex::new(false));
+    let redstone_user_process = |x: usize, y: usize| {
+        let mut emit_near = vec!();
+        for d in vec!(Direction::NORTH, Direction::SOUTH, Direction::EAST, Direction::WEST) {
+            emit_near.push(power_at(displace((x, y), d)).emit(value(MAX_POWER)))
+        }
+        let continue_loop: LoopStatus<()> = LoopStatus::Continue;
+        let user_press = user_press.clone();
+        let is_user_active = move|()| {
+            *user_press.lock().unwrap()
+        };
+        let p = if_else(value(()).map(is_user_active).pause(), value(()), multi_join(emit_near).then(display_signal.emit(value((x, y, MAX_POWER)))).then(value(())));
+        p.then(value(continue_loop)).while_loop()
     };
 
     let display_powers: Arc<Mutex<Vec<Power>>> = Arc::new(Mutex::new(vec![ZERO_POWER; w*h]));
@@ -196,9 +224,9 @@ pub fn redstone_sim() {
         };
         let powers_ref = powers.clone();
         let draw = move|_| {
-            use std::thread;
-            use std::time::Duration;
-            thread::sleep(Duration::from_millis(10));
+//            use std::thread;
+//            use std::time::Duration;
+//            thread::sleep(Duration::from_millis(150));
             let mut dpowers = display_powers_ref.lock().unwrap();
             let powers = powers_ref.lock().unwrap();
             dpowers.clone_from(&powers);
@@ -208,6 +236,7 @@ pub fn redstone_sim() {
 
     let mut p_redstone = Vec::new();
     let mut p_inverter = Vec::new();
+    let mut p_user = Vec::new();
     for x in 0..w {
         for y in 0..h {
             match blocks[x + y * w] {
@@ -215,18 +244,20 @@ pub fn redstone_sim() {
                 Type::BLOCK => (),
                 Type::REDSTONE(filter) => p_redstone.push(redstone_wire_process(x, y, filter)),
                 Type::INVERTER(dir) => p_inverter.push(redstone_torch_process(x, y, dir)),
+                Type::USER => p_user.push(redstone_user_process(x, y)),
             }
         }
     }
 
     let display_powers_ref = display_powers.clone();
+    let user_press = user_press.clone();
     thread::spawn(move || {
         //let opengl = OpenGL::V2_1;
         let opengl = OpenGL::V3_2;
 
         let mut window: Window = WindowSettings::new(
             "redstone",
-            [750, 750]
+            [1280, 720]
         )
             .opengl(opengl)
             .exit_on_esc(true)
@@ -280,14 +311,18 @@ pub fn redstone_sim() {
             if Some(Button::Keyboard(Key::Down)) == e.press_args(){
                 app.ty -= app.zoom;
             }
+            if Some(Button::Keyboard(Key::Space)) == e.press_args(){
+                *user_press.lock().unwrap() = true;
+            }
+            if Some(Button::Keyboard(Key::Space)) == e.release_args() {
+                *user_press.lock().unwrap() = false;
+            }
         }
     });
 
-    execute_process(multi_join(p_redstone).join(multi_join(p_inverter)).join(display_process()));
+    execute_process(multi_join(p_redstone).join(multi_join(p_inverter)).join(multi_join(p_user)).join(display_process()));
 
 }
-
-const MAX_POWER: Power = Power{r: 0xF, g: 0xF, b: 0xF};
 
 fn read_file(filename: String) -> (Vec<Type>, usize, usize) {
     let mut file = File::open(filename).unwrap();
@@ -311,6 +346,7 @@ fn read_file(filename: String) -> (Vec<Type>, usize, usize) {
             blocks.push(match ch {
                 '.' => Type::VOID,
                 '#' => Type::BLOCK,
+                '@' => Type::USER,
                 'r' => Type::REDSTONE(Power{r: 0x1, g: 0x0, b: 0x0}),
                 'g' => Type::REDSTONE(Power{r: 0x0, g: 0x1, b: 0x0}),
                 'b' => Type::REDSTONE(Power{r: 0x0, g: 0x0, b: 0x1}),
@@ -351,7 +387,7 @@ impl App {
         const BORDER_SIZE: f64 = 2.0;
         const POWER_MAX:   u8  = 15;
 
-        self.gl.draw(args.viewport(), |c, gl| {
+        self.gl.draw(args.viewport(), |_c, gl| {
             clear(VOID_COLOR, gl);
         });
 
@@ -413,6 +449,14 @@ impl App {
                         let transform2 = transform.rot_rad(pi/2.0).trans(0.0, -pixel_size*(0.5+1.0/6.0));
                         rectangle(color, rect, transform, gl);
                         rectangle(color, rect, transform2, gl);
+                    });
+                },
+                Type::USER => {
+                    self.gl.draw(args.viewport(), |c, gl| {
+                        let transform = c.transform.trans(x, y);
+                        rectangle(BLOCK_COLOR_IN, square, transform, gl);
+                        let transform = c.transform.trans(x+BORDER_SIZE, y+BORDER_SIZE);
+                        rectangle(BLOCK_COLOR_OUT, inner_square, transform, gl);
                     });
                 }
             }
